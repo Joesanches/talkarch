@@ -1,3 +1,4 @@
+import cors from '@fastify/cors';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { CaseContext, ConnectorId, EventType, SourceSystem, type CaseRef } from '@konsilium/protocol';
@@ -31,6 +32,9 @@ const issues = (e: z.ZodError) => e.issues.map((i) => i.message).join('; ');
 
 /** API для клиентов и SDK встраивания: `/api/v1/*`. Аутентификация — токен Matrix пользователя. */
 export async function clientRoutes(app: FastifyInstance, deps: AppDeps) {
+  // Веб-клиент работает с другого адреса: разрешаем только его (и SDK встраивания, который грузится оттуда же).
+  await app.register(cors, { origin: [deps.chatWebUrl], methods: ['POST'], allowedHeaders: ['authorization', 'content-type'], maxAge: 600 });
+
   // Кеш whoami: токен пользователя → Matrix ID (60 с), чтобы не ходить в Synapse на каждый запрос.
   const whoamiCache = new Map<string, { userId: string; until: number }>();
   async function currentUser(req: FastifyRequest): Promise<string | null> {

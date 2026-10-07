@@ -5,7 +5,8 @@
   "description": "Дизайн-токены: вывод оттенков из цвета бренда, проверка контраста, генерация CSS-переменных из design/tokens.json",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./theme": "./src/theme.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",

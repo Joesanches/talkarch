@@ -191,6 +191,8 @@ export function createHostMock(opts: HostMockOptions) {
     return null;
   }
 
+  app.get('/healthz', async () => ({ ok: true }));
+
   app.get('/:connector/cases/:caseId', async (req, reply) => {
     const c = authorize(req, reply);
     if (!c) return reply;

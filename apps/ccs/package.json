@@ -12,6 +12,7 @@
     "test:it": "vitest run --config vitest.it.config.ts"
   },
   "dependencies": {
+    "@fastify/cors": "^11.1.0",
     "@konsilium/protocol": "workspace:*",
     "fastify": "^5.2.0",
     "livekit-server-sdk": "^2.9.0",

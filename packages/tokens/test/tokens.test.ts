@@ -47,3 +47,19 @@ describe('mix и cssVariables', () => {
     expect(() => deriveShades('blue')).toThrow();
   });
 });
+
+describe('themeCss', () => {
+  it('собирает тему из design/tokens.json и акцента', async () => {
+    const { themeCss, themeVariables } = await import('../src/theme.ts');
+    const vars = themeVariables('#0E7C6B');
+    expect(vars.get('--color-accent')).toBe('#0E7C6B');
+    expect(vars.get('--color-neutral-text')).toBe('#16202B');
+    expect(vars.get('--font-ui')).toMatch(/Golos Text/);
+    expect(themeCss('#0E7C6B', '.chat')).toMatch(/^\.chat \{\n  --color-/);
+  });
+
+  it('не принимает акцент с плохим контрастом', async () => {
+    const { themeVariables } = await import('../src/theme.ts');
+    expect(() => themeVariables('#FFE680')).toThrow(/контраст/);
+  });
+});

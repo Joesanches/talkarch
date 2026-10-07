@@ -13,7 +13,10 @@
     "test:it": "pnpm --filter @konsilium/ccs run test:it",
     "tokens:css": "pnpm --filter @konsilium/tokens run build:css",
     "dev:ccs": "pnpm --filter @konsilium/ccs run dev",
-    "dev:host-mock": "pnpm --filter @konsilium/host-mock run dev"
+    "dev:host-mock": "pnpm --filter @konsilium/host-mock run dev",
+    "dev:web": "pnpm --filter @konsilium/web run dev",
+    "e2e": "pnpm --filter @konsilium/web run e2e",
+    "dev:users": "pnpm --filter @konsilium/host-mock run users"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

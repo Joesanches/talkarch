@@ -93,6 +93,19 @@ describe('POST /api/v1/cases/open', () => {
   });
 });
 
+describe('CORS для веб-клиента', () => {
+  it('разрешает запросы только с адреса веб-клиента', async () => {
+    const preflight = (origin: string) =>
+      h.app.inject({
+        method: 'OPTIONS',
+        url: '/api/v1/cases/open',
+        headers: { origin, 'access-control-request-method': 'POST', 'access-control-request-headers': 'authorization,content-type' },
+      });
+    expect((await preflight('https://chat.clinic.local')).headers['access-control-allow-origin']).toBe('https://chat.clinic.local');
+    expect((await preflight('https://evil.example')).headers['access-control-allow-origin']).toBeUndefined();
+  });
+});
+
 describe('POST /api/v1/cases/patient', () => {
   const reveal = (user: string, roomId: string) =>
     h.app.inject({ method: 'POST', url: '/api/v1/cases/patient', headers: { authorization: `Bearer tok-${user}` }, payload: { roomId, reason: 'сверка перед описанием' } });

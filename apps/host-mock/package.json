@@ -5,13 +5,15 @@
   "description": "Песочница РИС/ЛИС: эталон стороны системы-источника в интеграции с сервисом контекста (события и обратные вызовы)",
   "type": "module",
   "exports": {
-    ".": "./src/mock.ts"
+    ".": "./src/mock.ts",
+    "./users": "./src/users.ts"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "users": "tsx src/users.ts"
   },
   "dependencies": {
     "@konsilium/protocol": "workspace:*",

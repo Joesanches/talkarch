@@ -1,0 +1,142 @@
+import { useEffect, useReducer, useState } from 'react';
+import {
+  ClientEvent,
+  RoomEvent,
+  RoomStateEvent,
+  SyncState,
+  createClient,
+  type MatrixClient,
+  type MatrixEvent,
+  type Room,
+} from 'matrix-js-sdk';
+import { CCS_URL, HS_URL } from './config.ts';
+import type { TimelineItem } from './model.ts';
+
+export interface Session {
+  baseUrl: string;
+  userId: string;
+  accessToken: string;
+  deviceId: string;
+}
+
+// PoC: сессия в localStorage. В продукте — вход через Keycloak (OIDC) и токены в памяти/IndexedDB с обновлением.
+const KEY = 'konsilium.session';
+
+export function loadSession(): Session | null {
+  try {
+    const raw = localStorage.getItem(KEY);
+    return raw ? (JSON.parse(raw) as Session) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveSession(s: Session) {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(s));
+  } catch {
+    /* приватный режим — сессия живёт до перезагрузки */
+  }
+}
+
+export function clearSession() {
+  try {
+    localStorage.removeItem(KEY);
+  } catch {
+    /* ничего */
+  }
+}
+
+export async function login(username: string, password: string): Promise<Session> {
+  const tmp = createClient({ baseUrl: HS_URL });
+  const r = await tmp.loginRequest({
+    type: 'm.login.password',
+    identifier: { type: 'm.id.user', user: username.trim() },
+    password,
+    initial_device_display_name: 'Консилиум · веб',
+  });
+  return { baseUrl: HS_URL, userId: r.user_id, accessToken: r.access_token, deviceId: r.device_id };
+}
+
+export function startClient(s: Session): MatrixClient {
+  const client = createClient({ baseUrl: s.baseUrl, userId: s.userId, accessToken: s.accessToken, deviceId: s.deviceId });
+  // Шаг 2 PoC — обычная синхронизация с ленивой загрузкой участников. Simplified Sliding Sync — следующим шагом.
+  void client.startClient({ initialSyncLimit: 30, lazyLoadMembers: true });
+  return client;
+}
+
+/** Перерисовка при любых изменениях в клиенте (не чаще одного раза за кадр). */
+export function useClientUpdates(client: MatrixClient): number {
+  const [version, bump] = useReducer((v: number) => v + 1, 0);
+  useEffect(() => {
+    let frame = 0;
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(() => {
+        frame = 0;
+        bump();
+      });
+    };
+    const events = [ClientEvent.Sync, ClientEvent.Room, ClientEvent.DeleteRoom] as const;
+    const roomEvents = [RoomEvent.Timeline, RoomEvent.Name, RoomEvent.MyMembership, RoomEvent.Receipt, RoomEvent.LocalEchoUpdated] as const;
+    for (const e of events) client.on(e, schedule);
+    for (const e of roomEvents) client.on(e, schedule);
+    client.on(RoomStateEvent.Events, schedule);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      for (const e of events) client.off(e, schedule);
+      for (const e of roomEvents) client.off(e, schedule);
+      client.off(RoomStateEvent.Events, schedule);
+    };
+  }, [client]);
+  return version;
+}
+
+export function useSyncState(client: MatrixClient): SyncState | null {
+  const [state, setState] = useState<SyncState | null>(client.getSyncState());
+  useEffect(() => {
+    const on = (s: SyncState) => setState(s);
+    client.on(ClientEvent.Sync, on);
+    return () => {
+      client.off(ClientEvent.Sync, on);
+    };
+  }, [client]);
+  return state;
+}
+
+export const toItem = (e: MatrixEvent): TimelineItem => ({
+  eventId: e.getId() ?? e.getTxnId() ?? '',
+  type: e.getType(),
+  sender: e.getSender() ?? '',
+  ts: e.getTs(),
+  content: e.getContent(),
+  stateKey: e.getStateKey(),
+});
+
+export const timelineItems = (room: Room): TimelineItem[] => room.getLiveTimeline().getEvents().map(toItem);
+
+/** Личный чат: комната есть в m.direct. */
+export function directRoomIds(client: MatrixClient): Set<string> {
+  const content = (client.getAccountData('m.direct' as never)?.getContent() ?? {}) as Record<string, string[]>;
+  return new Set(Object.values(content).flat());
+}
+
+export class CcsError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** Открыть чат случая через сервис контекста: проверка прав в РИС/ЛИС, комната, приглашение. */
+export async function openCase(s: Session, connector: string, caseId: string): Promise<{ roomId: string; membership: string }> {
+  const res = await fetch(`${CCS_URL}/api/v1/cases/open`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${s.accessToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ connector, caseId }),
+  });
+  const json = (await res.json().catch(() => ({}))) as { roomId?: string; membership?: string; error?: string };
+  if (!res.ok) throw new CcsError(res.status, json.error ?? `Сервис контекста ответил ${res.status}`);
+  return { roomId: json.roomId!, membership: json.membership! };
+}
