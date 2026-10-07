@@ -16,5 +16,9 @@
     "fastify": "^5.2.0",
     "livekit-server-sdk": "^2.9.0",
     "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@konsilium/host-mock": "workspace:*",
+    "yaml": "^2.6.0"
   }
 }

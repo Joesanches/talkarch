@@ -1,0 +1,20 @@
+{
+  "$comment": "Подключения для окружения разработчика. Токены — только для разработки: lis → dev-only-lis-token-0123456789abcdef, ris → dev-only-ris-token-0123456789abcdef (в файле — их SHA-256). Обратные вызовы ЛИС обслуживает песочница apps/host-mock.",
+  "connectors": [
+    {
+      "id": "lis",
+      "kind": "LIS",
+      "org": "clinic",
+      "title": "ЛИС патоморфологии",
+      "token_sha256": "5f78fca1f99ad119a14f8c38972dc9b29f3a7c8df8c20254c689be7c4496342e",
+      "callbacks": { "url": "http://localhost:8090/lis", "token": "dev-only-lis-callback-token-0123456789" }
+    },
+    {
+      "id": "ris",
+      "kind": "RIS",
+      "org": "clinic",
+      "title": "РИС",
+      "token_sha256": "7d40c4958cc363025cc834c0d410a50ddfdeba84a87f949b889fd11eeb2be5b8"
+    }
+  ]
+}

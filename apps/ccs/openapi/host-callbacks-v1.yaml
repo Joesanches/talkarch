@@ -1,0 +1,266 @@
+openapi: 3.1.0
+info:
+  title: «Консилиум» — обратные вызовы в РИС, ЛИС и ТМК
+  version: 1.0.0-poc
+  summary: Эти методы реализует система-источник; вызывает их сервис контекста «Консилиума».
+  description: |
+    Нужны для **уровня 2** интеграции (см. docs/10-integration-api.md). На уровне 1 достаточно событий из `integration-v1.yaml`.
+
+    - Базовый адрес задаётся в настройках подключения, например `https://lis.clinic.local/konsilium/v1`.
+    - Сервис контекста предъявляет токен в `Authorization: Bearer`. В продукте — OAuth 2.0 client credentials или mTLS.
+    - Ответ ждём до 3 секунд (настраивается). Временные ошибки — `5xx`, `429`, тайм-аут: сервис повторит вызов позже.
+    - Пользователь в запросах — `UserRef` (`login` и `mxid`), см. `integration-v1.yaml`.
+    - Эталонная реализация — песочница `apps/host-mock`.
+servers:
+  - url: http://localhost:8090/lis
+    description: Песочница apps/host-mock (подключение lis)
+  - url: https://lis.clinic.local/konsilium/v1
+    description: Пример
+security:
+  - serviceToken: []
+paths:
+  /cases/{caseId}:
+    get:
+      operationId: getCase
+      summary: Снимок случая
+      description: |
+        Вызывается, когда пользователь открывает чат случая, о котором ещё не было события `case.upserted`.
+        Ответ — тот же снимок, что в `case.upserted`.
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Снимок случая
+          content:
+            application/json:
+              schema: { $ref: './integration-v1.yaml#/components/schemas/CaseSnapshot' }
+              examples:
+                lis: { $ref: '#/components/examples/CaseSnapshot' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /access-checks:
+    post:
+      operationId: checkAccess
+      summary: Может ли пользователь открыть чат случая
+      description: |
+        Вызывается, когда пользователь, которого нет среди участников случая, открывает чат (доступ по требованию).
+        Решение — по правилам системы-источника: отделение, дежурство, заведующий, консультант.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AccessCheckRequest' }
+            examples:
+              head: { $ref: '#/components/examples/AccessCheckRequest' }
+      responses:
+        '200':
+          description: Решение
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccessCheckResponse' }
+              examples:
+                allowed: { $ref: '#/components/examples/AccessCheckResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /requests:
+    post:
+      operationId: createRequest
+      summary: Заявка из чата (ИГХ, дорезка, пересмотр, второе мнение, сервисная)
+      description: |
+        Пользователь оформил заявку карточкой в чате случая. Система-источник создаёт её у себя и возвращает номер.
+        Дальнейшие шаги приходят в чат событиями `request.status.changed`.
+
+        **Идемпотентность:** заголовок `Idempotency-Key` — ID сообщения Matrix. Повтор с тем же ключом должен вернуть
+        ту же заявку, а не создать вторую.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRequestRequest' }
+            examples:
+              ihc: { $ref: '#/components/examples/CreateRequestRequest' }
+      responses:
+        '201':
+          description: Заявка создана
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreateRequestResponse' }
+              examples:
+                ihc: { $ref: '#/components/examples/CreateRequestResponse' }
+        '200':
+          description: Повтор с тем же ключом — та же заявка
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreateRequestResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /patient-reveals:
+    post:
+      operationId: revealPatient
+      summary: Данные пациента для участника чата
+      description: |
+        Пользователь нажал «Показать данные пациента». Система-источник проверяет права, **пишет раскрытие в свой журнал**
+        и возвращает данные. В Matrix они не попадают: сервис контекста передаёт их клиенту без кеширования.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PatientRevealRequest' }
+            examples:
+              reveal: { $ref: '#/components/examples/PatientRevealRequest' }
+      responses:
+        '200':
+          description: Данные пациента
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PatientRevealResponse' }
+              examples:
+                patient: { $ref: '#/components/examples/PatientRevealResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  securitySchemes:
+    serviceToken:
+      type: http
+      scheme: bearer
+      description: Токен сервиса контекста для этого подключения
+  responses:
+    Unauthorized:
+      description: Неверный токен сервиса
+      content:
+        application/problem+json:
+          schema: { $ref: './integration-v1.yaml#/components/schemas/Problem' }
+    NotFound:
+      description: Случай не найден
+      content:
+        application/problem+json:
+          schema: { $ref: './integration-v1.yaml#/components/schemas/Problem' }
+    Forbidden:
+      description: Нет прав
+      content:
+        application/problem+json:
+          schema: { $ref: './integration-v1.yaml#/components/schemas/Problem' }
+  schemas:
+    AccessCheckRequest:
+      type: object
+      required: [case_id, user]
+      properties:
+        case_id: { type: string }
+        user: { $ref: './integration-v1.yaml#/components/schemas/UserRef' }
+    AccessCheckResponse:
+      type: object
+      required: [allowed]
+      properties:
+        allowed: { type: boolean }
+        role:
+          $ref: './integration-v1.yaml#/components/schemas/CaseRole'
+          description: Роль, с которой пользователь войдёт в чат (если известна)
+    CreateRequestRequest:
+      type: object
+      required: [case_id, request, requested_by, chat]
+      properties:
+        case_id: { type: string }
+        request:
+          type: object
+          required: [kind]
+          properties:
+            kind: { type: string, enum: [ihc, recut, review, second_opinion, service] }
+            block: { type: string, description: Блок (кассета) для ИГХ и дорезки }
+            items:
+              type: array
+              items: { type: string }
+              description: Маркеры, стёкла или позиции
+            priority: { $ref: './integration-v1.yaml#/components/schemas/Priority' }
+            note: { type: string }
+            assignee_role: { $ref: './integration-v1.yaml#/components/schemas/CaseRole' }
+        requested_by: { $ref: './integration-v1.yaml#/components/schemas/UserRef' }
+        chat:
+          type: object
+          required: [room_id, event_id]
+          properties:
+            room_id: { type: string }
+            event_id: { type: string }
+    CreateRequestResponse:
+      type: object
+      required: [external_id, status]
+      properties:
+        external_id: { type: string, maxLength: 64 }
+        status: { $ref: './integration-v1.yaml#/components/schemas/RequestStep' }
+        steps:
+          type: array
+          maxItems: 10
+          items: { $ref: './integration-v1.yaml#/components/schemas/RequestStep' }
+    PatientRevealRequest:
+      type: object
+      required: [case_id, user]
+      properties:
+        case_id: { type: string }
+        user: { $ref: './integration-v1.yaml#/components/schemas/UserRef' }
+        reason: { type: string, maxLength: 200 }
+    PatientRevealResponse:
+      type: object
+      required: [display_name]
+      properties:
+        display_name: { type: string, maxLength: 200 }
+        birth_date: { type: string, format: date }
+        mrn: { type: string, maxLength: 64, description: Номер медицинской карты }
+  examples:
+    CaseSnapshot:
+      value:
+        case_id: Г26-04530
+        version: 1
+        status: open
+        title: Операционный материал, толстая кишка
+        patient:
+          ref: 'pseudo:91d0e25b'
+          masked: Л*** И. С.
+          age: 61
+          sex: M
+        order_id: Н-2640
+        stage: grossing
+        participants:
+          - user: { login: smirnova }
+            role: pathologist
+        updated_at: '2026-10-07T10:40:00+03:00'
+    AccessCheckRequest:
+      value:
+        case_id: Г26-04512
+        user: { mxid: '@gusev:chat.clinic.local', login: gusev }
+    AccessCheckResponse:
+      value: { allowed: true, role: head }
+    CreateRequestRequest:
+      value:
+        case_id: Г26-04512
+        request:
+          kind: ihc
+          block: 1А
+          items: [ER, PR, HER2/neu, Ki-67]
+          priority: urgent
+        requested_by: { mxid: '@smirnova:chat.clinic.local', login: smirnova }
+        chat:
+          room_id: '!8Hq3KcV0ZqWm2gFQjz:chat.clinic.local'
+          event_id: $Wb1f0q3x9k2LzT7c
+    CreateRequestResponse:
+      value:
+        external_id: ИГХ-7781
+        status: accepted
+        steps: [accepted, staining, scanning, done]
+    PatientRevealRequest:
+      value:
+        case_id: Г26-04512
+        user: { mxid: '@smirnova:chat.clinic.local', login: smirnova }
+        reason: Сверка перед описанием
+    PatientRevealResponse:
+      value:
+        display_name: Нестерова Ольга Викторовна
+        birth_date: '1972-03-14'
+        mrn: МК-0412

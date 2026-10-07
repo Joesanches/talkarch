@@ -1,0 +1,502 @@
+openapi: 3.1.0
+info:
+  title: «Консилиум» — API интеграции для РИС, ЛИС и ТМК
+  version: 1.0.0-poc
+  summary: Система-источник сообщает сервису контекста о случаях, заявках и уведомлениях.
+  description: |
+    Это API вызывает **система-источник** (РИС, ЛИС, ТМК). Обратное направление — вызовы из сервиса контекста
+    в систему-источник — описано в `host-callbacks-v1.yaml`.
+
+    Подробно о модели, уровнях интеграции и адаптерах для систем других производителей — `docs/10-integration-api.md`.
+
+    Главное:
+    - события — в формате **CloudEvents 1.0** (структурированный JSON); `id` — ключ идемпотентности, `source` — идентификатор подключения;
+    - снимок случая (`case.upserted`) всегда полный, его `version` растёт при любом изменении;
+    - каждое событие в пакете получает свой итог; при временных ошибках ответ — `503`, пакет можно повторить целиком;
+    - ошибки уровня запроса — в формате RFC 9457 (`application/problem+json`);
+    - изменения в рамках `v1` только добавочные: неизвестные поля в ответах нужно игнорировать.
+  contact:
+    name: Команда «Консилиума»
+servers:
+  - url: http://localhost:8080/integration/v1
+    description: Окружение разработчика
+  - url: https://chat.clinic.local/integration/v1
+    description: Пример продуктивного адреса
+security:
+  - connectorToken: []
+tags:
+  - name: События
+    description: Случаи, статусы заявок и уведомления из системы-источника
+  - name: Чаты случаев
+    description: Есть ли чат по случаю; создание чата по запросу системы-источника
+  - name: Служебное
+    description: Проверка настройки подключения
+paths:
+  /connector:
+    get:
+      tags: [Служебное]
+      operationId: getConnector
+      summary: Кто я — проверка настройки подключения
+      responses:
+        '200':
+          description: Подключение, от имени которого выполнен запрос
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConnectorInfo' }
+              examples:
+                lis: { $ref: '#/components/examples/ConnectorInfo' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /events:
+    post:
+      tags: [События]
+      operationId: postEvents
+      summary: Отправить событие или пакет событий
+      description: |
+        Пакет обрабатывается по порядку; итог по каждому событию — в `results` в том же порядке.
+
+        | Итог | Что значит | Что делать |
+        |---|---|---|
+        | `accepted` | Принято и применено | — |
+        | `duplicate` | Событие с этим `id` уже обработано | — |
+        | `stale` | `version` меньше уже полученной | — |
+        | `ignored` | Принято, но действий не требует (например, уведомление по случаю без чата) | — |
+        | `rejected` | Не по контракту или противоречит данным; `detail` — причина | Исправить и отправить с новым `id` |
+        | `failed` | Временная ошибка | Повторить (ответ при этом — `503`) |
+      requestBody:
+        required: true
+        content:
+          application/cloudevents-batch+json:
+            schema: { $ref: '#/components/schemas/EventBatch' }
+            examples:
+              batch: { $ref: '#/components/examples/Batch' }
+          application/cloudevents+json:
+            schema: { $ref: '#/components/schemas/Event' }
+            examples:
+              caseUpserted: { $ref: '#/components/examples/CaseUpserted' }
+              requestStatusChanged: { $ref: '#/components/examples/RequestStatusChanged' }
+              notificationPosted: { $ref: '#/components/examples/NotificationPosted' }
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/Event'
+                - $ref: '#/components/schemas/EventBatch'
+      responses:
+        '200':
+          description: Пакет обработан; итоги — по каждому событию
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EventsResponse' }
+              examples:
+                mixed: { $ref: '#/components/examples/EventsResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413':
+          description: В пакете больше 100 событий
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503':
+          description: Есть события с итогом `failed`. Повторите пакет после паузы из `Retry-After`; принятые события вернутся как `duplicate`.
+          headers:
+            Retry-After:
+              schema: { type: integer }
+              description: Через сколько секунд повторить
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EventsResponse' }
+  /cases/{caseId}/chat:
+    parameters:
+      - $ref: '#/components/parameters/CaseId'
+    get:
+      tags: [Чаты случаев]
+      operationId: getCaseChat
+      summary: Есть ли чат по случаю
+      description: Для иконки «есть обсуждение» в карточке случая или рабочем списке. Счётчики непрочитанного — персональные, их даёт SDK встраивания в режиме `headless`.
+      responses:
+        '200':
+          description: Сведения о чате; `chat` равен `null`, если чата нет
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatInfo' }
+              examples:
+                exists: { $ref: '#/components/examples/ChatInfo' }
+                none: { $ref: '#/components/examples/ChatInfoNone' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: [Чаты случаев]
+      operationId: ensureCaseChat
+      summary: Создать чат по случаю (идемпотентно)
+      description: |
+        Например, по кнопке «Обсудить» или при назначении консилиума. Обычно вызывать не нужно: чат создаётся сам,
+        когда пользователь впервые открывает его из РИС/ЛИС. Участники по ролям приглашаются из последнего `case.upserted`.
+      responses:
+        '200':
+          description: Чат уже был
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatInfo' }
+        '201':
+          description: Чат создан
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatInfo' }
+              examples:
+                created: { $ref: '#/components/examples/ChatInfo' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Случай неизвестен — сначала отправьте `case.upserted`
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+components:
+  securitySchemes:
+    connectorToken:
+      type: http
+      scheme: bearer
+      description: |
+        Токен подключения. В PoC — статический (сервис хранит только SHA-256).
+        В продукте — OAuth 2.0 client credentials (Keycloak) или mTLS; см. docs/10-integration-api.md, раздел «Безопасность».
+  parameters:
+    CaseId:
+      name: caseId
+      in: path
+      required: true
+      description: Номер случая (исследования, заказа) в системе-источнике. Регистр не важен.
+      schema: { type: string, minLength: 1, maxLength: 128 }
+  responses:
+    BadRequest:
+      description: Тело запроса — не событие и не массив событий
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthorized:
+      description: Нет токена подключения или он неверный
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    ConnectorId:
+      type: string
+      pattern: '^[a-z0-9][a-z0-9_-]{0,31}$'
+      description: Идентификатор подключения — конкретного экземпляра РИС, ЛИС или ТМК. Выдаёт администратор «Консилиума».
+      examples: [lis, ris-gkb1]
+    ConnectorInfo:
+      type: object
+      required: [id, kind, org, title, level]
+      properties:
+        id: { $ref: '#/components/schemas/ConnectorId' }
+        kind: { $ref: '#/components/schemas/SourceSystem' }
+        org: { type: string }
+        title: { type: string }
+        level:
+          type: integer
+          enum: [1, 2]
+          description: 1 — только события; 2 — события и обратные вызовы
+    SourceSystem:
+      type: string
+      enum: [RIS, LIS, TMK]
+    CaseRole:
+      type: string
+      enum: [pathologist, radiologist, attending, lab_tech, radiographer, engineer, head, external_consultant, on_duty, viewer]
+    CaseStatus:
+      type: string
+      enum: [open, closed, cancelled]
+      default: open
+    Priority:
+      type: string
+      enum: [routine, urgent, cito]
+    RequestStep:
+      type: string
+      enum: [created, accepted, staining, scanning, done, rejected]
+    UserRef:
+      type: object
+      description: |
+        Пользователь глазами системы-источника. Нужен хотя бы один идентификатор.
+        Сопоставление с учётной записью мессенджера: `mxid` → `login` → `idp_sub` → `employee_id`.
+        Пользователь, ещё не входивший в мессенджер, получит приглашение при первом входе.
+      properties:
+        mxid: { type: string, pattern: '^@[^:\s]+:\S+$', description: 'Matrix ID, если известен' }
+        login: { type: string, maxLength: 255, description: Логин в домене (AD/LDAP) — основной способ }
+        idp_sub: { type: string, maxLength: 255, description: Идентификатор пользователя в Keycloak (claim sub) }
+        employee_id: { type: string, maxLength: 64, description: Табельный номер }
+        display_name: { type: string, maxLength: 200, description: Только для журналов и предупреждений }
+      anyOf:
+        - required: [mxid]
+        - required: [login]
+        - required: [idp_sub]
+        - required: [employee_id]
+    Participant:
+      type: object
+      required: [user, role]
+      properties:
+        user: { $ref: '#/components/schemas/UserRef' }
+        role: { $ref: '#/components/schemas/CaseRole' }
+    PatientRef:
+      type: object
+      additionalProperties: false
+      required: [ref, masked]
+      description: |
+        Только псевдоним и маска. ФИО, дата рождения и номера документов в мессенджер не передаются —
+        их по запросу отдаёт обратный вызов `patient-reveals` с записью в журнал системы-источника.
+      properties:
+        ref: { type: string, description: 'Стабильный псевдоним пациента (например, HMAC от идентификатора в МПИ)' }
+        masked: { type: string, description: 'Маска для показа: первая буква фамилии и инициалы, «Н*** О. В.»' }
+        age: { type: integer, minimum: 0, maximum: 130 }
+        sex: { type: string, enum: [F, M, U] }
+    CaseLinks:
+      type: object
+      properties:
+        record: { type: string, format: uri, description: Карточка случая в системе-источнике }
+        viewer: { type: string, format: uri, description: 'Вьюер (DICOM, WSI)' }
+    CaseSnapshot:
+      type: object
+      description: Полный снимок случая. Что не передано — сброшено. Исключение — `revoked`, это явная команда.
+      required: [case_id, version, title, patient, updated_at]
+      properties:
+        case_id: { type: string, minLength: 1, maxLength: 128 }
+        version:
+          type: integer
+          minimum: 0
+          description: Монотонно растущая версия — номер ревизии, rowversion или время изменения в миллисекундах. Растёт при любом изменении.
+        status: { $ref: '#/components/schemas/CaseStatus' }
+        title: { type: string, minLength: 1, maxLength: 200, description: 'Вид исследования или материала, без ФИО: «КТ-ангиопульмонография»' }
+        patient: { $ref: '#/components/schemas/PatientRef' }
+        order_id: { type: string, maxLength: 128 }
+        accession_number: { type: string, maxLength: 64 }
+        study_instance_uid: { type: string, pattern: '^[0-9]+(\.[0-9]+)*$', maxLength: 64 }
+        stage: { type: string, maxLength: 64, description: 'Этап в терминах системы-источника (grossing, ihc, reporting…)' }
+        priority: { $ref: '#/components/schemas/Priority' }
+        due: { type: string, format: date-time }
+        links: { $ref: '#/components/schemas/CaseLinks' }
+        participants:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/Participant' }
+          description: Участники по ролям — их приглашают в чат случая
+        access:
+          type: array
+          maxItems: 500
+          items: { $ref: '#/components/schemas/UserRef' }
+          description: Кому ещё можно открыть чат. Для уровня 1; на уровне 2 права проверяет обратный вызов `access-checks`.
+        revoked:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/UserRef' }
+          description: Отозвать доступ — пользователь будет выведен из чата
+        updated_at: { type: string, format: date-time }
+    RequestStatusChanged:
+      type: object
+      required: [case_id, external_id, status, changed_at]
+      properties:
+        case_id: { type: string }
+        external_id: { type: string, maxLength: 64, description: 'Номер заявки, который система-источник вернула при её создании' }
+        status: { $ref: '#/components/schemas/RequestStep' }
+        steps:
+          type: array
+          maxItems: 10
+          items: { $ref: '#/components/schemas/RequestStep' }
+          description: Шаги для полосы прогресса; если не переданы — прежние
+        note: { type: string, maxLength: 500 }
+        changed_at: { type: string, format: date-time }
+    NotificationLink:
+      type: object
+      required: [label, url]
+      properties:
+        label: { type: string, maxLength: 40 }
+        url: { type: string, format: uri }
+    NotificationPosted:
+      type: object
+      required: [case_id, text]
+      properties:
+        case_id: { type: string }
+        text: { type: string, minLength: 1, maxLength: 2000, description: Без ФИО пациента }
+        category: { type: string, enum: [info, ready, report, warning], default: info }
+        links:
+          type: array
+          maxItems: 3
+          items: { $ref: '#/components/schemas/NotificationLink' }
+        ensure_chat:
+          type: boolean
+          default: false
+          description: Создать чат, если его нет. По умолчанию уведомление по случаю без чата игнорируется.
+    EventBase:
+      type: object
+      description: Конверт CloudEvents 1.0 (структурированный режим). Расширения CloudEvents (например, `traceparent`) допускаются.
+      required: [specversion, id, source, type, data]
+      properties:
+        specversion: { const: '1.0' }
+        id: { type: string, maxLength: 256, description: Уникален в пределах подключения; ключ идемпотентности }
+        source: { $ref: '#/components/schemas/ConnectorId' }
+        type: { type: string }
+        time: { type: string, format: date-time }
+        subject: { type: string, description: 'Рекомендуется: номер случая — для маршрутизации в брокерах' }
+        datacontenttype: { const: application/json }
+    CaseUpsertedEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventBase'
+        - type: object
+          properties:
+            type: { const: ru.vendor.case.upserted }
+            data: { $ref: '#/components/schemas/CaseSnapshot' }
+    RequestStatusChangedEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventBase'
+        - type: object
+          properties:
+            type: { const: ru.vendor.request.status.changed }
+            data: { $ref: '#/components/schemas/RequestStatusChanged' }
+    NotificationPostedEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventBase'
+        - type: object
+          properties:
+            type: { const: ru.vendor.notification.posted }
+            data: { $ref: '#/components/schemas/NotificationPosted' }
+    Event:
+      oneOf:
+        - $ref: '#/components/schemas/CaseUpsertedEvent'
+        - $ref: '#/components/schemas/RequestStatusChangedEvent'
+        - $ref: '#/components/schemas/NotificationPostedEvent'
+      discriminator:
+        propertyName: type
+        mapping:
+          ru.vendor.case.upserted: '#/components/schemas/CaseUpsertedEvent'
+          ru.vendor.request.status.changed: '#/components/schemas/RequestStatusChangedEvent'
+          ru.vendor.notification.posted: '#/components/schemas/NotificationPostedEvent'
+    EventBatch:
+      type: array
+      minItems: 1
+      maxItems: 100
+      items: { $ref: '#/components/schemas/Event' }
+    EventResult:
+      type: object
+      required: [id, status]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [accepted, duplicate, stale, ignored, rejected, failed] }
+        detail: { type: string }
+        warnings: { type: array, items: { type: string } }
+    EventsResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/EventResult' }
+    ChatInfo:
+      type: object
+      required: [case_id, chat]
+      properties:
+        case_id: { type: string }
+        chat:
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [room_id, alias, url]
+              properties:
+                room_id: { type: string }
+                alias: { type: string }
+                url: { type: string, format: uri, description: Ссылка на чат в веб-клиенте }
+    Problem:
+      type: object
+      description: RFC 9457 Problem Details
+      required: [title, status]
+      properties:
+        type: { type: string, default: about:blank }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+  examples:
+    ConnectorInfo:
+      value: { id: lis, kind: LIS, org: clinic, title: ЛИС патоморфологии, level: 2 }
+    CaseUpserted:
+      summary: Снимок случая ЛИС
+      value:
+        specversion: '1.0'
+        id: lis:Г26-04512:v3
+        source: lis
+        type: ru.vendor.case.upserted
+        time: '2026-10-07T09:12:00+03:00'
+        subject: Г26-04512
+        datacontenttype: application/json
+        data:
+          case_id: Г26-04512
+          version: 3
+          status: open
+          title: Биопсия молочной железы, слева
+          patient: { ref: 'pseudo:7f3c9a1e', masked: Н*** О. В., age: 54, sex: F }
+          order_id: Н-2611
+          stage: ihc
+          priority: urgent
+          due: '2026-10-09T18:00:00+03:00'
+          links:
+            record: https://lis.clinic.local/cases/G26-04512
+            viewer: https://wsi.clinic.local/case/G26-04512
+          participants:
+            - { user: { login: smirnova, display_name: Смирнова А. В. }, role: pathologist }
+            - { user: { login: ershova }, role: lab_tech }
+            - { user: { login: kolesnikov }, role: attending }
+          updated_at: '2026-10-07T09:12:00+03:00'
+    RequestStatusChanged:
+      summary: Заявка ИГХ перешла на окраску
+      value:
+        specversion: '1.0'
+        id: rs:ИГХ-7781:staining
+        source: lis
+        type: ru.vendor.request.status.changed
+        data:
+          case_id: Г26-04512
+          external_id: ИГХ-7781
+          status: staining
+          changed_at: '2026-10-07T11:40:00+03:00'
+    NotificationPosted:
+      summary: Служебное уведомление с кнопкой
+      value:
+        specversion: '1.0'
+        id: 6b0e2a8e-1f7c-4a43-9c55-5d1f0c3b7a10
+        source: lis
+        type: ru.vendor.notification.posted
+        data:
+          case_id: Г26-04512
+          text: Готовы препараты ИГХ, стёкла отсканированы
+          category: ready
+          links: [{ label: Открыть в ЛИС, url: https://lis.clinic.local/cases/G26-04512 }]
+    Batch:
+      summary: Пакет из двух событий
+      value:
+        - specversion: '1.0'
+          id: ris:A26-118734:v1
+          source: ris
+          type: ru.vendor.case.upserted
+          data:
+            case_id: A26-118734
+            version: 1
+            title: КТ-ангиопульмонография
+            patient: { ref: 'pseudo:2b8d0c44', masked: С*** В. П., age: 67, sex: M }
+            accession_number: A26-118734
+            study_instance_uid: 1.2.643.5.1.13.13.12.2.77.8252.118734
+            priority: cito
+            participants:
+              - { user: { login: orlov }, role: radiologist }
+              - { user: { login: melnikova }, role: on_duty }
+            access: [{ login: belova }]
+            updated_at: '2026-10-07T08:47:00+03:00'
+        - specversion: '1.0'
+          id: ris:A26-118734:n1
+          source: ris
+          type: ru.vendor.notification.posted
+          data: { case_id: A26-118734, text: 'Исследование выполнено, серии в PACS', category: info }
+    EventsResponse:
+      value:
+        results:
+          - { id: 'ris:A26-118734:v1', status: accepted }
+          - { id: 'ris:A26-118734:n1', status: ignored, detail: 'Чата по случаю нет, а ensure_chat не задан' }
+    ChatInfo:
+      value:
+        case_id: Г26-04512
+        chat:
+          room_id: '!8Hq3KcV0ZqWm2gFQjz:chat.clinic.local'
+          alias: '#c-3f9a0c1d2e4b5a6978a1b2c3:chat.clinic.local'
+          url: https://chat.clinic.local/c/lis/%D0%9326-04512
+    ChatInfoNone:
+      value: { case_id: Г26-04530, chat: null }

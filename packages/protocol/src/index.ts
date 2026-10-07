@@ -49,6 +49,12 @@ export const ReactionKey = {
   Urgent: 'срочно',
 } as const;
 
+/**
+ * Поле служебного уведомления из РИС/ЛИС в `m.notice`: категория и кнопки-ссылки.
+ * Клиенты, не знающие поля, показывают обычный текст из `body`.
+ */
+export const NotificationField = `${NS}.notification` as const;
+
 export const SourceSystem = z.enum(['RIS', 'LIS', 'TMK']);
 export type SourceSystem = z.infer<typeof SourceSystem>;
 
@@ -66,22 +72,37 @@ export const CaseRole = z.enum([
 ]);
 export type CaseRole = z.infer<typeof CaseRole>;
 
-/** Ссылка на случай во внешней системе. */
+/**
+ * Идентификатор подключения — конкретного экземпляра РИС, ЛИС или ТМК («lis», «ris-gkb1», «tmk-vendorx»).
+ * Тип системы (RIS/LIS/TMK) — свойство подключения: в одной организации могут работать две РИС разных производителей.
+ */
+export const ConnectorId = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/, 'Идентификатор подключения: a–z, 0–9, «_», «-», до 32 символов');
+export type ConnectorId = z.infer<typeof ConnectorId>;
+
+/** Ссылка на случай: подключение + номер случая (исследования, заказа) в нём. */
 export const CaseRef = z.object({
-  org: z.string().trim().min(1),
-  system: SourceSystem,
+  connector: ConnectorId,
   caseId: z.string().trim().min(1).max(128),
 });
 export type CaseRef = z.infer<typeof CaseRef>;
 
 /**
- * Канонический ключ случая: «организация + система + номер».
+ * Канонический ключ случая: «подключение + номер».
  * Номер сравнивается без учёта регистра и пробелов по краям: «г26-04512» и «Г26-04512» — один случай.
  */
 export function caseKey(ref: CaseRef): string {
   const parsed = CaseRef.parse(ref);
-  return [parsed.org.toLowerCase(), parsed.system, parsed.caseId.toUpperCase()].join(':');
+  return [parsed.connector, parsed.caseId.toUpperCase()].join(':');
 }
+
+export const Priority = z.enum(['routine', 'urgent', 'cito']);
+export type Priority = z.infer<typeof Priority>;
+
+/** Состояние случая в системе-источнике. */
+export const CaseStatus = z.enum(['open', 'closed', 'cancelled']);
+export type CaseStatus = z.infer<typeof CaseStatus>;
+
+export const CaseLinks = z.object({ record: z.string().url().optional(), viewer: z.string().url().optional() });
 
 /**
  * Данные пациента в чате — только псевдоним и маска.
@@ -99,17 +120,21 @@ export type PatientRef = z.infer<typeof PatientRef>;
 
 /** State-событие `ru.vendor.case.context` (state_key = ""). */
 export const CaseContext = z.object({
+  /** Тип системы-источника — для подписи и иконки в клиенте. */
   source: SourceSystem,
+  /** Подключение, из которого пришёл случай. */
+  connector: ConnectorId,
   case_id: z.string().min(1),
+  status: CaseStatus.optional(),
   order_id: z.string().nullish(),
   accession_number: z.string().nullish(),
   study_instance_uid: z.string().nullish(),
   title: z.string().min(1),
   patient: PatientRef,
   stage: z.string().optional(),
-  priority: z.enum(['routine', 'urgent', 'cito']).optional(),
+  priority: Priority.optional(),
   due: z.string().datetime({ offset: true }).optional(),
-  links: z.object({ record: z.string().url().optional(), viewer: z.string().url().optional() }).optional(),
+  links: CaseLinks.optional(),
   sync: z.object({ version: z.number().int().nonnegative(), updated_at: z.string() }),
 });
 export type CaseContext = z.infer<typeof CaseContext>;
@@ -166,7 +191,7 @@ export const RequestMessage = MessageBase.extend({
     kind: RequestKind,
     block: z.string().optional(),
     items: z.array(z.string().min(1)).default([]),
-    priority: z.enum(['routine', 'urgent', 'cito']).default('routine'),
+    priority: Priority.default('routine'),
     note: z.string().optional(),
     assignee_role: CaseRole.optional(),
   }),
@@ -183,6 +208,7 @@ export const RequestStatusContent = z.object({
   status: RequestStep,
   steps: z.array(RequestStep),
   by: z.string().optional(),
+  note: z.string().max(500).optional(),
   source: z.union([SourceSystem, z.literal('CCS')]),
 });
 export type RequestStatusContent = z.infer<typeof RequestStatusContent>;
@@ -198,6 +224,19 @@ export const CriticalMessage = MessageBase.extend({
   }),
 });
 export type CriticalMessage = z.infer<typeof CriticalMessage>;
+
+export const NotificationCategory = z.enum(['info', 'ready', 'report', 'warning']);
+export type NotificationCategory = z.infer<typeof NotificationCategory>;
+
+export const NotificationLink = z.object({ label: z.string().min(1).max(40), url: z.string().url() });
+
+/** Содержимое поля `ru.vendor.notification` в `m.notice` от сервиса. */
+export const NotificationInfo = z.object({
+  category: NotificationCategory,
+  links: z.array(NotificationLink).max(3).default([]),
+  connector: ConnectorId,
+});
+export type NotificationInfo = z.infer<typeof NotificationInfo>;
 
 /** State-событие `ru.vendor.call` — идущий звонок или консилиум в комнате (state_key = call_id). */
 export const CallState = z.object({

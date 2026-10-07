@@ -1,0 +1,21 @@
+{
+  "name": "@konsilium/host-mock",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Песочница РИС/ЛИС: эталон стороны системы-источника в интеграции с сервисом контекста (события и обратные вызовы)",
+  "type": "module",
+  "exports": {
+    ".": "./src/mock.ts"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@konsilium/protocol": "workspace:*",
+    "fastify": "^5.2.0",
+    "zod": "^3.25.0"
+  }
+}

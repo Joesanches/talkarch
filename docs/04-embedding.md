@@ -25,13 +25,15 @@
 <vendor-chat
   mode="panel"
   server="https://chat.clinic.local"
-  context-system="RIS"
-  context-accession="A26-118734"
+  context-connector="ris"
+  context-case-id="A26-118734"
   context-study-uid="1.2.643.5.1.13.13.12.2.77.8252.118734"
   theme="host"
   locale="ru">
 </vendor-chat>
 ```
+
+`connector` — идентификатор подключения РИС/ЛИС в «Консилиуме», `caseId` — номер случая или исследования в ней. Если подключение такого типа в организации одно, можно передать `system: 'RIS'` вместо `connector`. Серверная сторона интеграции — в [10-integration-api.md](10-integration-api.md).
 
 Или программно (npm-пакет, TypeScript):
 
@@ -43,14 +45,14 @@ const chat = await createChat({
   mode: 'panel',                                    // 'full' | 'panel' | 'launcher' | 'headless'
   server: 'https://chat.clinic.local',
   auth: { kind: 'oidc-silent' },                    // или { kind: 'token', getToken: () => host.getAccessToken() }
-  context: { system: 'RIS', accession: 'A26-118734', studyUid: '1.2.643.5.1.13.13.12.2.77.8252.118734' },
+  context: { connector: 'ris', caseId: 'A26-118734', studyUid: '1.2.643.5.1.13.13.12.2.77.8252.118734' },
   theme: { preset: 'corp', accent: '#1F6FB2', scheme: 'light', density: 'compact' },
   features: { calls: true, voice: true, criticalResults: true },
   locale: 'ru',
 });
 
 // Хост → чат
-await chat.setContext({ system: 'RIS', accession: 'A26-118739' });   // пользователь открыл другое исследование
+await chat.setContext({ connector: 'ris', caseId: 'A26-118739' });   // пользователь открыл другое исследование
 await chat.attach({                                                  // кнопка «В чат исследования» во вьюере
   kind: 'key_image',
   studyUid, seriesUid, sopUid, frame: 1,
@@ -79,7 +81,7 @@ chat.destroy();
 ```ts
 const counters = await createChat({ mode: 'headless', server, auth: { kind: 'oidc-silent' } });
 const stop = counters.watchUnread(
-  [{ system: 'RIS', accession: 'A26-118734' }, { system: 'RIS', accession: 'A26-118736' }],
+  [{ connector: 'ris', caseId: 'A26-118734' }, { connector: 'ris', caseId: 'A26-118736' }],
   (items) => items.forEach((i) => worklist.setBadge(i.context, i.unread, i.critical)),
 );
 ```
@@ -139,7 +141,7 @@ const stop = counters.watchUnread(
 | Цифровая патология | DICOM WSI (Supplement 145), IHE PaLM |
 | Контекст исследования и заказа | FHIR R4: `ServiceRequest`, `ImagingStudy`, `DiagnosticReport`, `Specimen`; события — FHIR Subscriptions или HL7 v2 (ORM/ORU/ADT) |
 | Запуск во внешних МИС | SMART App Launch (передача пациента и контекста из МИС) |
-| Глубокие ссылки в приложения | `vendorchat://case/RIS/A26-118734` и универсальная ссылка `https://chat.clinic.local/c/RIS/A26-118734` |
+| Глубокие ссылки в приложения | `vendorchat://case/ris/A26-118734` и универсальная ссылка `https://chat.clinic.local/c/ris/A26-118734` (`/c/{подключение}/{номер случая}`) |
 
 ## 6. Тема хоста
 

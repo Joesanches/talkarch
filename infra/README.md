@@ -1,6 +1,6 @@
 # Окружение разработчика
 
-Окружение поднимает три сервиса: PostgreSQL, Synapse 1.162 и LiveKit 1.13 (в режиме `--dev`). Сервис клинического контекста (`apps/ccs`) запускается на хосте. Все секреты здесь — только для разработки.
+Окружение поднимает три сервиса: PostgreSQL, Synapse 1.162 и LiveKit 1.13 (в режиме `--dev`). Сервис клинического контекста (`apps/ccs`) и песочница РИС/ЛИС (`apps/host-mock`) запускаются на хосте. Все секреты здесь — только для разработки.
 
 ## Запуск
 
@@ -12,11 +12,15 @@ cd infra && docker compose up -d && cd ..
 # сервис контекста (Synapse обращается к нему по адресу host.docker.internal:8080)
 cp apps/ccs/.env.example apps/ccs/.env
 set -a && . apps/ccs/.env && set +a && pnpm dev:ccs
+
+# в другом терминале — песочница РИС/ЛИС: обратные вызовы на порту 8090, при старте отправит снимки случаев
+pnpm dev:host-mock
 ```
 
 Проверка:
 - `curl http://localhost:8008/_matrix/client/versions` — Synapse;
-- `curl http://localhost:8080/healthz` — сервис контекста.
+- `curl http://localhost:8080/healthz` — сервис контекста;
+- `curl -H 'authorization: Bearer dev-only-lis-token-0123456789abcdef' http://localhost:8080/integration/v1/connector` — подключение ЛИС.
 
 ## Тесты
 
@@ -26,28 +30,44 @@ pnpm typecheck   # проверка типов
 pnpm test:it     # интеграционные тесты на настоящем Synapse (нужен docker compose up)
 ```
 
-Интеграционный тест сам поднимает сервис контекста на порту 8080. Перед `pnpm test:it` остановите `pnpm dev:ccs`.
+Интеграционный тест сам поднимает сервис контекста на порту 8080 и песочницу РИС/ЛИС на порту 8090. Перед `pnpm test:it` остановите `pnpm dev:ccs` и `pnpm dev:host-mock`.
 
-Каждый прогон использует свою «организацию», поэтому комнаты из прошлых прогонов не мешают. Тестовые пользователи создаются через admin API Synapse с общим секретом. Пароль — `dev-only-password-1`.
+Каждый прогон использует свой секрет псевдонимов, поэтому комнаты из прошлых прогонов не мешают. Тестовые пользователи создаются через admin API Synapse с общим секретом. Пароль — `dev-only-password-1`.
 
-## Тестовые пользователи и случаи
+## Подключения, случаи и пользователи
 
-Справочник случаев — `apps/ccs/fixtures/host-directory.json`:
+Подключения — `apps/ccs/fixtures/connectors.json`:
+
+| Подключение | Уровень | Токен подключения | Обратные вызовы |
+|---|---|---|---|
+| `lis` — ЛИС патоморфологии | 2 | `dev-only-lis-token-0123456789abcdef` | `http://localhost:8090/lis`, токен `dev-only-lis-callback-token-0123456789` |
+| `ris` — РИС | 1 | `dev-only-ris-token-0123456789abcdef` | — |
+
+Случаи песочницы — `apps/host-mock/fixtures/cases.json` (данные вымышлены):
 
 | Случай | Участники по ролям | Доступ по требованию |
 |---|---|---|
-| ЛИС `Г26-04512` | smirnova (патоморфолог), ershova (лаборант ИГХ), kolesnikov (лечащий врач) | gusev (заведующий) |
-| РИС `A26-118734` | orlov (рентгенолог), safonova (рентгенолаборант), melnikova (дежурный терапевт) | — |
+| ЛИС `Г26-04512` | smirnova (патоморфолог), ershova (лаборант ИГХ), kolesnikov (лечащий врач) | gusev (заведующий) — через обратный вызов ЛИС |
+| ЛИС `Г26-04530` | smirnova | — (событие не отправляется при старте: сервис запросит снимок у ЛИС) |
+| РИС `A26-118734` | orlov (рентгенолог), safonova (рентгенолаборант), melnikova (дежурный терапевт) | belova — по списку `access` в событии |
 
 Пользователь `outsider` доступа ни к одному случаю не имеет.
 
 ## API сервиса контекста
 
-- `POST /api/v1/cases/open` с телом `{ "system": "LIS", "caseId": "Г26-04512" }` и токеном Matrix в заголовке `Authorization: Bearer`.
-  - Сервис проверяет права в системе-источнике, создаёт комнату при первом обращении и приглашает пользователя.
-  - Ответ: `{ roomId, alias, created, membership }`.
+**Для клиентов** (токен Matrix пользователя в `Authorization: Bearer`):
+
+- `POST /api/v1/cases/open` с телом `{ "connector": "lis", "caseId": "Г26-04512" }` (или `{ "system": "LIS", … }`, если подключение такого типа одно). Сервис проверяет права, создаёт комнату при первом обращении и приглашает пользователя. Ответ: `{ roomId, alias, created, membership, connector, caseId }`.
+- `POST /api/v1/cases/patient` с телом `{ "roomId": "!…" }` — данные пациента у ЛИС для вошедшего участника, без кеширования.
 - `POST /api/v1/calls/token` с телом `{ "roomId": "!…" }` — токен LiveKit, только для вошедших участников комнаты.
-- `/_matrix/app/v1/*` — API Application Service для Synapse. Заявка в чате случая уходит в ЛИС (заглушку), и статус `ru.vendor.request.status` возвращается в чат.
+
+**Для РИС/ЛИС** (токен подключения) — `/integration/v1/*`, см. [docs/10-integration-api.md](../docs/10-integration-api.md):
+
+- `POST /integration/v1/events` — события CloudEvents;
+- `GET` и `PUT /integration/v1/cases/{caseId}/chat` — есть ли чат, создать чат;
+- `GET /integration/v1/connector` — проверка подключения.
+
+**Для Synapse** — `/_matrix/app/v1/*` (Application Service API). Заявка в чате случая уходит в ЛИС обратным вызовом, статусы `ru.vendor.request.status` возвращаются в чат.
 
 ## Остановка и сброс
 

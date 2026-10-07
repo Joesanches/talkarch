@@ -2,23 +2,25 @@ import { describe, expect, it } from 'vitest';
 import { CaseContext, MsgType, caseKey, parseStructured, requestFallbackBody } from '../src/index.ts';
 
 describe('caseKey', () => {
-  it('нормализует регистр номера и организации', () => {
-    expect(caseKey({ org: 'Clinic', system: 'LIS', caseId: ' г26-04512 ' })).toBe('clinic:LIS:Г26-04512');
-    expect(caseKey({ org: 'clinic', system: 'LIS', caseId: 'Г26-04512' })).toBe('clinic:LIS:Г26-04512');
+  it('нормализует регистр номера и пробелы', () => {
+    expect(caseKey({ connector: 'lis', caseId: ' г26-04512 ' })).toBe('lis:Г26-04512');
+    expect(caseKey({ connector: 'lis', caseId: 'Г26-04512' })).toBe('lis:Г26-04512');
   });
 
-  it('различает системы', () => {
-    expect(caseKey({ org: 'c', system: 'RIS', caseId: 'X1' })).not.toBe(caseKey({ org: 'c', system: 'LIS', caseId: 'X1' }));
+  it('различает подключения', () => {
+    expect(caseKey({ connector: 'ris', caseId: 'X1' })).not.toBe(caseKey({ connector: 'ris-gkb2', caseId: 'X1' }));
   });
 
-  it('отклоняет пустой номер', () => {
-    expect(() => caseKey({ org: 'c', system: 'RIS', caseId: '  ' })).toThrow();
+  it('отклоняет пустой номер и недопустимый идентификатор подключения', () => {
+    expect(() => caseKey({ connector: 'ris', caseId: '  ' })).toThrow();
+    expect(() => caseKey({ connector: 'РИС', caseId: 'X1' })).toThrow();
   });
 });
 
 describe('CaseContext', () => {
   const base = {
     source: 'LIS',
+    connector: 'lis',
     case_id: 'Г26-04512',
     title: 'Биопсия молочной железы, слева',
     patient: { ref: 'pseudo:7f3c9a1e', masked: 'Н*** О. В.', age: 54, sex: 'F' },

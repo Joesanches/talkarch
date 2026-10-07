@@ -4,7 +4,7 @@ interface FakeRoom {
   id: string;
   req: CreateRoomRequest;
   state: Map<string, Record<string, unknown>>;
-  events: Array<{ type: string; content: Record<string, unknown>; txnId?: string }>;
+  events: Array<{ type: string; content: Record<string, unknown>; txnId?: string; eventId: string }>;
 }
 
 /** Поддельный homeserver в памяти для модульных тестов. */
@@ -15,6 +15,18 @@ export class FakeMatrix implements MatrixApi {
   createCalls = 0;
   /** Искусственная задержка createRoom — чтобы проверить параллельные вызовы. */
   createDelayMs = 0;
+  /** Задержка записи state-события (мс) — чтобы проверить параллельные синхронизации. */
+  stateDelay: (type: string, content: Record<string, unknown>) => number = () => 0;
+  /** Ошибка для следующей записи (sendState/sendEvent) — имитация сбоя сервера. */
+  failNextWrite: MatrixError | null = null;
+
+  private maybeFail() {
+    const e = this.failNextWrite;
+    if (e) {
+      this.failNextWrite = null;
+      throw e;
+    }
+  }
 
   constructor(readonly botUserId = '@ccs:konsilium.test', private readonly serverName = 'konsilium.test') {}
 
@@ -64,6 +76,10 @@ export class FakeMatrix implements MatrixApi {
     this.room(roomId).state.set(this.key('m.room.member', userId), { membership: 'invite' });
   }
 
+  async kick(roomId: string, userId: string) {
+    this.room(roomId).state.set(this.key('m.room.member', userId), { membership: 'leave' });
+  }
+
   join(roomId: string, userId: string) {
     this.room(roomId).state.set(this.key('m.room.member', userId), { membership: 'join' });
   }
@@ -73,21 +89,32 @@ export class FakeMatrix implements MatrixApi {
     return (m?.membership as Membership | undefined) ?? null;
   }
 
+  /** Сообщения комнаты определённого типа (для проверок). */
+  messages(roomId: string, type = 'm.room.message') {
+    return this.room(roomId).events.filter((e) => e.type === type);
+  }
+
   async getState<T>(roomId: string, type: string, stateKey = '') {
     return (this.room(roomId).state.get(this.key(type, stateKey)) as T | undefined) ?? null;
   }
 
   async sendState(roomId: string, type: string, stateKey: string, content: Record<string, unknown>) {
+    this.maybeFail();
     this.checkStateKey(type, stateKey);
+    const delay = this.stateDelay(type, content);
+    if (delay) await new Promise((r) => setTimeout(r, delay));
     this.room(roomId).state.set(this.key(type, stateKey), content);
     return `$state${Math.random()}`;
   }
 
   async sendEvent(roomId: string, type: string, content: Record<string, unknown>, txnId?: string) {
+    this.maybeFail();
     const room = this.room(roomId);
     const dup = txnId ? room.events.find((e) => e.txnId === txnId) : undefined;
-    if (!dup) room.events.push({ type, content, txnId });
-    return `$event${room.events.length}`;
+    if (dup) return dup.eventId;
+    const eventId = `$event${room.events.length + 1}.${room.id}`;
+    room.events.push({ type, content, txnId, eventId });
+    return eventId;
   }
 
   async whoami(token: string) {

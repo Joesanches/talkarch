@@ -28,6 +28,7 @@ export interface MatrixApi {
   createRoom(req: CreateRoomRequest): Promise<string>;
   resolveAlias(alias: string): Promise<string | null>;
   invite(roomId: string, userId: string, reason?: string): Promise<void>;
+  kick(roomId: string, userId: string, reason?: string): Promise<void>;
   getMembership(roomId: string, userId: string): Promise<Membership | null>;
   getState<T = Record<string, unknown>>(roomId: string, type: string, stateKey?: string): Promise<T | null>;
   sendState(roomId: string, type: string, stateKey: string, content: Record<string, unknown>): Promise<string>;
@@ -92,6 +93,10 @@ export class HttpMatrixApi implements MatrixApi {
     await this.call('POST', `/rooms/${enc(roomId)}/invite`, { user_id: userId, ...(reason ? { reason } : {}) });
   }
 
+  async kick(roomId: string, userId: string, reason?: string): Promise<void> {
+    await this.call('POST', `/rooms/${enc(roomId)}/kick`, { user_id: userId, ...(reason ? { reason } : {}) });
+  }
+
   async getMembership(roomId: string, userId: string): Promise<Membership | null> {
     const m = await this.getState<{ membership?: Membership }>(roomId, 'm.room.member', userId);
     return m?.membership ?? null;
@@ -114,6 +119,22 @@ export class HttpMatrixApi implements MatrixApi {
   async sendEvent(roomId: string, type: string, content: Record<string, unknown>, txnId = newTxnId()): Promise<string> {
     const r = await this.call<{ event_id: string }>('PUT', `/rooms/${enc(roomId)}/send/${enc(type)}/${enc(txnId)}`, content);
     return r.event_id;
+  }
+
+  /**
+   * Ping Application Service (`/_matrix/client/v1/appservice/{id}/ping`): Synapse вызывает наш `/_matrix/app/v1/ping`
+   * и при успехе сразу досылает накопленные транзакции. Без этого после простоя сервиса Synapse ждёт паузу
+   * повторов — до 512 с. Возвращает время ответа в мс.
+   */
+  async pingAppservice(appserviceId: string): Promise<number> {
+    const res = await fetch(`${this.hsUrl}/_matrix/client/v1/appservice/${enc(appserviceId)}/ping`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${this.asToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ transaction_id: newTxnId() }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { duration_ms?: number; errcode?: string; error?: string };
+    if (!res.ok) throw new MatrixError(res.status, json.errcode ?? 'M_UNKNOWN', json.error ?? res.statusText);
+    return json.duration_ms ?? 0;
   }
 
   async setBotDisplayName(name: string): Promise<void> {

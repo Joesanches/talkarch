@@ -12,10 +12,13 @@
     "test": "pnpm -r run test",
     "test:it": "pnpm --filter @konsilium/ccs run test:it",
     "tokens:css": "pnpm --filter @konsilium/tokens run build:css",
-    "dev:ccs": "pnpm --filter @konsilium/ccs run dev"
+    "dev:ccs": "pnpm --filter @konsilium/ccs run dev",
+    "dev:host-mock": "pnpm --filter @konsilium/host-mock run dev"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

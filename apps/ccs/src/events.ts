@@ -1,7 +1,10 @@
-import { EventType, MsgType, RequestMessage, type CaseRef, type RequestStatusContent } from '@konsilium/protocol';
-import type { CaseRoomStore } from './caseRooms.ts';
-import type { HostDirectory } from './host.ts';
-import type { MatrixApi } from './matrix.ts';
+import { CaseContext, EventType, MsgType, RequestMessage, type RequestStatusContent } from '@konsilium/protocol';
+import type { CaseDirectory } from './cases.ts';
+import type { UserResolver } from './connectors.ts';
+import { HostError } from './host.ts';
+import { isTransient } from './integration.ts';
+import { MatrixError, type MatrixApi } from './matrix.ts';
+import type { RequestStore } from './requests.ts';
 
 export interface MatrixEvent {
   event_id: string;
@@ -19,53 +22,114 @@ export interface Logger {
 }
 
 /**
+ * Ошибка, после которой транзакцию нужно повторить: Synapse получит 503 и пришлёт её снова (с паузами).
+ * Так заявка не теряется, пока ЛИС недоступна. В продукте — исходящая очередь (outbox), чтобы не задерживать другие события.
+ */
+export class RetryLaterError extends Error {}
+
+/**
  * Обработка событий из транзакций Application Service.
- * Сейчас: заявка в чате случая → создание в системе-источнике → статус обратно в чат.
+ * Сейчас: заявка в чате случая → обратный вызов в систему-источник → статус обратно в чат.
  */
 export class EventProcessor {
-  private readonly seen = new Set<string>();
+  private readonly done = new Set<string>();
 
   constructor(
-    private readonly deps: { matrix: MatrixApi; store: CaseRoomStore; host: HostDirectory; org: string; log: Logger },
+    private readonly deps: { matrix: MatrixApi; directory: CaseDirectory; requests: RequestStore; users: UserResolver; log: Logger },
   ) {}
 
   async handle(event: MatrixEvent): Promise<void> {
-    if (this.seen.has(event.event_id)) return;
-    this.remember(event.event_id);
-    if (event.sender === this.deps.matrix.botUserId) return;
-    if (event.type === 'm.room.message' && event.content.msgtype === MsgType.Request) {
+    if (this.done.has(event.event_id)) return;
+    if (event.sender !== this.deps.matrix.botUserId && event.type === 'm.room.message' && event.content.msgtype === MsgType.Request) {
       await this.onRequest(event);
+    }
+    // Отмечаем только после успешной обработки: при повторе транзакции событие обработается снова.
+    this.done.add(event.event_id);
+    if (this.done.size > 10_000) {
+      const oldest = this.done.values().next().value;
+      if (oldest !== undefined) this.done.delete(oldest);
     }
   }
 
-  private remember(eventId: string) {
-    this.seen.add(eventId);
-    if (this.seen.size > 10_000) {
-      const oldest = this.seen.values().next().value;
-      if (oldest !== undefined) this.seen.delete(oldest);
+  /** Контекст случая из состояния комнаты: его пишет только сервис, поэтому ему можно верить. */
+  private async caseContext(roomId: string): Promise<CaseContext | null> {
+    try {
+      const raw = await this.deps.matrix.getState(roomId, EventType.CaseContext);
+      const parsed = CaseContext.safeParse(raw);
+      return parsed.success ? parsed.data : null;
+    } catch (e) {
+      if (e instanceof MatrixError && e.status < 500) return null; // не наша комната
+      throw e;
     }
   }
 
   private async onRequest(event: MatrixEvent) {
-    const key = await this.deps.store.keyByRoom(event.room_id);
-    if (!key) return; // не чат случая — заявки здесь не обрабатываем
+    const ctx = await this.caseContext(event.room_id);
+    if (!ctx) return; // не чат случая — заявки здесь не обрабатываем
     const parsed = RequestMessage.safeParse(event.content);
     if (!parsed.success) {
       this.deps.log.warn({ eventId: event.event_id, issues: parsed.error.issues }, 'Некорректная заявка');
       return;
     }
-    const [, system, ...rest] = key.split(':') as [string, CaseRef['system'], ...string[]];
-    const ref: CaseRef = { org: this.deps.org, system, caseId: rest.join(':') };
+    const callbacks = this.deps.directory.callbacks(ctx.connector);
+    if (!callbacks) {
+      await this.deps.matrix.sendEvent(
+        event.room_id,
+        'm.room.message',
+        { msgtype: 'm.notice', body: 'Заявки из чата для этой системы не подключены. Оформите заявку в системе-источнике.' },
+        `noreq.${event.event_id}`,
+      );
+      return;
+    }
+
     const request = parsed.data[MsgType.Request];
-    const created = await this.deps.host.createRequest(ref, request);
+    let created;
+    try {
+      created = await callbacks.createRequest(
+        {
+          case_id: ctx.case_id,
+          request,
+          requested_by: this.deps.users.toRef(event.sender),
+          chat: { room_id: event.room_id, event_id: event.event_id },
+        },
+        event.event_id,
+      );
+    } catch (e) {
+      if (isTransient(e)) throw new RetryLaterError(`Система-источник недоступна: ${(e as Error).message}`);
+      const reason = e instanceof HostError && e.status === 403 ? 'нет прав на заявку' : 'система-источник отклонила заявку';
+      await this.deps.matrix.sendEvent(
+        event.room_id,
+        EventType.RequestStatus,
+        {
+          'm.relates_to': { rel_type: 'm.reference', event_id: event.event_id },
+          external_id: '—',
+          status: 'rejected',
+          steps: ['rejected'],
+          source: 'CCS',
+          note: reason,
+        } satisfies RequestStatusContent,
+        `status-${event.event_id}`,
+      );
+      return;
+    }
+
+    const steps = created.steps ?? (request.kind === 'ihc' ? ['accepted', 'staining', 'scanning', 'done'] : ['accepted', 'done']);
+    await this.deps.requests.add({
+      connector: ctx.connector,
+      caseId: ctx.case_id,
+      externalId: created.external_id,
+      roomId: event.room_id,
+      eventId: event.event_id,
+      steps,
+    });
     const status: RequestStatusContent = {
       'm.relates_to': { rel_type: 'm.reference', event_id: event.event_id },
-      external_id: created.externalId,
+      external_id: created.external_id,
       status: created.status,
-      steps: request.kind === 'ihc' ? ['accepted', 'staining', 'scanning', 'done'] : ['accepted', 'done'],
-      source: system,
+      steps,
+      source: ctx.source,
     };
     await this.deps.matrix.sendEvent(event.room_id, EventType.RequestStatus, status as unknown as Record<string, unknown>, `status-${event.event_id}`);
-    this.deps.log.info({ roomId: event.room_id, externalId: created.externalId }, 'Заявка создана в системе-источнике');
+    this.deps.log.info({ roomId: event.room_id, externalId: created.external_id }, 'Заявка создана в системе-источнике');
   }
 }
