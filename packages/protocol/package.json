@@ -1,0 +1,17 @@
+{
+  "name": "@konsilium/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Типы и схемы событий Matrix для «чата случая»: общие для сервиса контекста, клиентов и SDK встраивания",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^3.25.0"
+  }
+}

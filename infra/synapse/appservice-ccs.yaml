@@ -1,0 +1,18 @@
+# Регистрация сервиса клинического контекста (Application Service). Токены — только для разработки,
+# совпадают с apps/ccs/.env.example.
+id: konsilium-ccs
+url: http://host.docker.internal:8080
+as_token: dev-only-as-token-0123456789abcdef
+hs_token: dev-only-hs-token-0123456789abcdef
+sender_localpart: ccs
+# Сервис создаёт комнаты случаев пачками — без ограничений частоты.
+rate_limited: false
+namespaces:
+  users:
+    - exclusive: true
+      regex: '@ccs(-[a-z0-9._-]+)?:konsilium\.test'
+  # Псевдонимы чатов случаев #c-<HMAC> создаёт только сервис.
+  aliases:
+    - exclusive: true
+      regex: '#c-[0-9a-f]+:konsilium\.test'
+  rooms: []

@@ -1,0 +1,42 @@
+import { createHmac } from 'node:crypto';
+import { AccessToken } from 'livekit-server-sdk';
+import type { MatrixApi } from './matrix.ts';
+
+export class ForbiddenError extends Error {}
+
+export interface CallTokenResult {
+  url: string;
+  token: string;
+  room: string;
+}
+
+/**
+ * Токены LiveKit выдаются только участникам комнаты Matrix (проверка — токеном самого пользователя).
+ * Имя комнаты LiveKit непредсказуемо: HMAC(room_id, call_id). Подробнее — docs/03-architecture.md, раздел 7.
+ */
+export class CallTokenService {
+  constructor(
+    private readonly matrix: MatrixApi,
+    private readonly opts: { url: string; apiKey: string; apiSecret: string; roomSecret: string; ttl?: string },
+  ) {}
+
+  livekitRoomName(roomId: string, callId: string): string {
+    return 'call-' + createHmac('sha256', this.opts.roomSecret).update(`${roomId}\n${callId}`).digest('hex').slice(0, 24);
+  }
+
+  async issue(userAccessToken: string, roomId: string, callId = 'main'): Promise<CallTokenResult> {
+    const userId = await this.matrix.whoami(userAccessToken);
+    let members: string[];
+    try {
+      members = await this.matrix.joinedMembersAs(userAccessToken, roomId);
+    } catch {
+      throw new ForbiddenError('Нет доступа к комнате');
+    }
+    if (!members.includes(userId)) throw new ForbiddenError('Пользователь не состоит в комнате');
+
+    const room = this.livekitRoomName(roomId, callId);
+    const at = new AccessToken(this.opts.apiKey, this.opts.apiSecret, { identity: userId, ttl: this.opts.ttl ?? '10m' });
+    at.addGrant({ roomJoin: true, room, canPublish: true, canSubscribe: true, canPublishData: true });
+    return { url: this.opts.url, token: await at.toJwt(), room };
+  }
+}

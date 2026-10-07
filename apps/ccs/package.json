@@ -1,0 +1,20 @@
+{
+  "name": "@konsilium/ccs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Сервис клинического контекста (Matrix Application Service): чаты случаев, права из РИС/ЛИС, заявки, токены видеосвязи",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run test/unit",
+    "test:it": "vitest run --config vitest.it.config.ts"
+  },
+  "dependencies": {
+    "@konsilium/protocol": "workspace:*",
+    "fastify": "^5.2.0",
+    "livekit-server-sdk": "^2.9.0",
+    "zod": "^3.25.0"
+  }
+}

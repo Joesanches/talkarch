@@ -1,0 +1,57 @@
+# Конфигурация Synapse для разработки PoC. Секреты ниже — только для локальной разработки.
+server_name: konsilium.test
+public_baseurl: http://localhost:8008/
+pid_file: /data/homeserver.pid
+signing_key_path: /data/signing.key
+media_store_path: /data/media_store
+log_config: /config/log.yaml
+report_stats: false
+suppress_key_server_warning: true
+trusted_key_servers: []
+
+listeners:
+  - port: 8008
+    type: http
+    tls: false
+    x_forwarded: true
+    bind_addresses: ["0.0.0.0"]
+    resources:
+      - names: [client]
+        compress: false
+
+database:
+  name: psycopg2
+  args:
+    user: synapse
+    password: synapse-dev
+    database: synapse
+    host: postgres
+    cp_min: 2
+    cp_max: 10
+
+# Регистрация только через admin API (общий секрет) — для тестовых пользователей.
+enable_registration: false
+registration_shared_secret: "dev-only-registration-shared-secret"
+macaroon_secret_key: "dev-only-macaroon-secret-key"
+form_secret: "dev-only-form-secret"
+
+# Сервис клинического контекста как Application Service.
+app_service_config_files:
+  - /config/appservice-ccs.yaml
+
+# Федерация в окружении разработчика выключена (пустой список разрешённых серверов).
+federation_domain_whitelist: []
+
+# Щадящие лимиты для тестов.
+rc_message:
+  per_second: 50
+  burst_count: 100
+rc_login:
+  address: { per_second: 10, burst_count: 100 }
+  account: { per_second: 10, burst_count: 100 }
+  failed_attempts: { per_second: 10, burst_count: 100 }
+rc_joins:
+  local: { per_second: 50, burst_count: 100 }
+rc_invites:
+  per_room: { per_second: 50, burst_count: 100 }
+  per_user: { per_second: 50, burst_count: 100 }

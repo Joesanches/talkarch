@@ -1,0 +1,65 @@
+# Окружение разработчика PoC: PostgreSQL + Synapse + LiveKit.
+# Сервис контекста (apps/ccs) запускается на хосте: pnpm dev:ccs — Synapse ходит к нему через host.docker.internal.
+# Все секреты здесь — только для разработки.
+name: konsilium-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: synapse
+      POSTGRES_PASSWORD: synapse-dev
+      POSTGRES_DB: synapse
+      # Synapse требует сортировку C.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synapse"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Однократно создаёт ключ подписи сервера в томе synapse-data.
+  synapse-keys:
+    image: matrixdotorg/synapse:v1.162.0
+    entrypoint: ["python", "-m", "synapse.app.homeserver"]
+    command: ["-c", "/config/homeserver.yaml", "--generate-keys"]
+    volumes:
+      - ./synapse:/config:ro
+      - synapse-data:/data
+
+  synapse:
+    image: matrixdotorg/synapse:v1.162.0
+    entrypoint: ["python", "-m", "synapse.app.homeserver"]
+    command: ["-c", "/config/homeserver.yaml"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      synapse-keys:
+        condition: service_completed_successfully
+    ports:
+      - "8008:8008"
+    volumes:
+      - ./synapse:/config:ro
+      - synapse-data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8008/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+  # Режим --dev: ключ devkey / секрет secret. Не для продуктива.
+  livekit:
+    image: livekit/livekit-server:v1.13
+    command: ["--dev", "--bind", "0.0.0.0"]
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+
+volumes:
+  pgdata: {}
+  synapse-data: {}

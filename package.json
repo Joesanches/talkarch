@@ -1,0 +1,26 @@
+{
+  "name": "konsilium",
+  "private": true,
+  "description": "Корпоративный медицинский мессенджер «Консилиум» (рабочее название): монорепозиторий PoC",
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --parallel run typecheck",
+    "test": "pnpm -r run test",
+    "test:it": "pnpm --filter @konsilium/ccs run test:it",
+    "tokens:css": "pnpm --filter @konsilium/tokens run build:css",
+    "dev:ccs": "pnpm --filter @konsilium/ccs run dev"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}

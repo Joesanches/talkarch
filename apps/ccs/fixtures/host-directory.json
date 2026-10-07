@@ -1,0 +1,38 @@
+{
+  "$comment": "Тестовый справочник случаев для PoC. Пользователи — локальные части Matrix ID. Данные вымышлены.",
+  "cases": [
+    {
+      "system": "LIS",
+      "caseId": "Г26-04512",
+      "title": "Биопсия молочной железы, слева",
+      "patient": { "ref": "pseudo:7f3c9a1e", "masked": "Н*** О. В.", "age": 54, "sex": "F" },
+      "orderId": "Н-2611",
+      "stage": "ihc",
+      "priority": "urgent",
+      "due": "2026-10-09T18:00:00+03:00",
+      "links": { "record": "https://lis.clinic.local/cases/G26-04512", "viewer": "https://wsi.clinic.local/case/G26-04512" },
+      "participants": [
+        { "user": "smirnova", "role": "pathologist" },
+        { "user": "ershova", "role": "lab_tech" },
+        { "user": "kolesnikov", "role": "attending" }
+      ],
+      "access": ["smirnova", "ershova", "kolesnikov", "gusev"]
+    },
+    {
+      "system": "RIS",
+      "caseId": "A26-118734",
+      "title": "КТ-ангиопульмонография",
+      "patient": { "ref": "pseudo:2b8d0c44", "masked": "С*** В. П.", "age": 67, "sex": "M" },
+      "accessionNumber": "A26-118734",
+      "studyUid": "1.2.643.5.1.13.13.12.2.77.8252.118734",
+      "stage": "reporting",
+      "priority": "cito",
+      "participants": [
+        { "user": "orlov", "role": "radiologist" },
+        { "user": "safonova", "role": "radiographer" },
+        { "user": "melnikova", "role": "on_duty" }
+      ],
+      "access": ["orlov", "safonova", "melnikova"]
+    }
+  ]
+}

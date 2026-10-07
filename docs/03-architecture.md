@@ -106,17 +106,26 @@ flowchart TB
 - Полное ФИО по кнопке «Показать» клиент запрашивает у ССК, а ССК — у РИС/ЛИС с проверкой прав.
 - Каждое раскрытие пишется в журнал.
 
-Роли участников хранятся отдельным state-событием на каждого пользователя:
+Роли участников хранятся одним state-событием со словарём «Matrix ID → роль»:
 
 ```json
 {
-  "type": "ru.vendor.case.role",
-  "state_key": "@smirnova:clinic.local",
-  "content": { "role": "pathologist", "source": "LIS", "assigned_at": "2026-10-06T08:41:00+03:00" }
+  "type": "ru.vendor.case.roles",
+  "state_key": "",
+  "content": {
+    "members": {
+      "@smirnova:clinic.local": { "role": "pathologist", "source": "LIS", "assigned_at": "2026-10-06T08:41:00+03:00" },
+      "@ershova:clinic.local": { "role": "lab_tech", "source": "LIS", "assigned_at": "2026-10-06T08:41:00+03:00" }
+    }
+  }
 }
 ```
 
-Возможные роли: `pathologist`, `radiologist`, `attending`, `lab_tech`, `radiographer`, `engineer`, `head`, `external_consultant`, `on_duty`.
+**Почему не отдельное событие на каждого участника.** По правилам авторизации Matrix state-событие с ключом, начинающимся с `@`, может отправить только сам этот пользователь. Роли же назначает сервис, поэтому отдельные события на участника он записать не может. Это поймал интеграционный тест на Synapse.
+
+Возможные роли: `pathologist`, `radiologist`, `attending`, `lab_tech`, `radiographer`, `engineer`, `head`, `external_consultant`, `on_duty`, `viewer`.
+
+**Версия комнат.** Synapse 1.162 по умолчанию создаёт комнаты версии 12. В ней у создателя комнаты (у нас — сервис контекста) неограниченные права, и его нельзя перечислять в `m.room.power_levels.users`: такой запрос Synapse отклонит. Сервис не указывает себя в `users`. В комнатах до версии 12 пресет `private_chat` сам даёт создателю уровень 100.
 
 ### 3.3. Структурированные сообщения
 

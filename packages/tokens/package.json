@@ -1,0 +1,15 @@
+{
+  "name": "@konsilium/tokens",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Дизайн-токены: вывод оттенков из цвета бренда, проверка контраста, генерация CSS-переменных из design/tokens.json",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "build:css": "tsx scripts/build-css.ts"
+  }
+}
