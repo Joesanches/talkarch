@@ -20,8 +20,10 @@ import {
   type RequestView,
   type TimelineItem,
 } from '../model.ts';
+import { activeCall, formatDuration } from '../call.ts';
 import { toItem } from '../matrix.ts';
 import { RoomAvatar } from './ChatList.tsx';
+import { RequestForm } from './RequestForm.tsx';
 import { Icon } from './Icon.tsx';
 
 const sexLabel: Record<string, string> = { F: 'Ж', M: 'М' };
@@ -108,8 +110,9 @@ function Notice({ item }: { item: TimelineItem }) {
   );
 }
 
-function Composer({ client, room }: { client: MatrixClient; room: Room }) {
+function Composer({ client, room, requests }: { client: MatrixClient; room: Room; requests: boolean }) {
   const [text, setText] = useState('');
+  const [form, setForm] = useState(false);
   const invited = room.getMyMembership() === 'invite';
 
   async function send() {
@@ -136,16 +139,39 @@ function Composer({ client, room }: { client: MatrixClient; room: Room }) {
     );
   }
   return (
+    <div className="composer-wrap">
+      {requests && form && <RequestForm client={client} roomId={room.roomId} onDone={() => setForm(false)} />}
+      {requests && !form && (
+        <div className="quick-actions">
+          <button className="ghost" onClick={() => setForm(true)}>
+            + Заявка в ЛИС
+          </button>
+        </div>
+      )}
     <div className="composer">
       <textarea rows={1} placeholder="Сообщение" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} aria-label="Сообщение" />
       <button className="send" onClick={() => void send()} disabled={!text.trim()} aria-label="Отправить">
         <Icon name="send" />
       </button>
     </div>
+    </div>
   );
 }
 
-export function ChatView({ client, room, onBack }: { client: MatrixClient; room: Room; onBack: () => void }) {
+export function ChatView({
+  client,
+  room,
+  onBack,
+  inCall,
+  onCall,
+}: {
+  client: MatrixClient;
+  room: Room;
+  onBack: () => void;
+  /** Пользователь уже в звонке этой комнаты. */
+  inCall: boolean;
+  onCall: (video: boolean) => void;
+}) {
   const me = client.getUserId()!;
   const events: MatrixEvent[] = room.getLiveTimeline().getEvents();
   const items = events.map(toItem);
@@ -154,6 +180,8 @@ export function ChatView({ client, room, onBack }: { client: MatrixClient; room:
   const roles = (room.currentState.getStateEvents(EventType.CaseRoles, '')?.getContent() as CaseRolesContent | undefined)?.members ?? {};
   const name = (userId: string) => room.getMember(userId)?.name ?? userId;
   const members = room.getJoinedMemberCount() + room.getInvitedMemberCount();
+  const joined = room.getMyMembership() === 'join';
+  const call = activeCall(room);
 
   // Прокрутка: держимся низа, если пользователь не листает историю.
   const scroller = useRef<HTMLDivElement>(null);
@@ -214,6 +242,17 @@ export function ChatView({ client, room, onBack }: { client: MatrixClient; room:
       prevSender = '';
       return;
     }
+    if (e.type === EventType.Call) {
+      flush();
+      prevSender = '';
+      const startedAt = Date.parse(String(e.content.started_at ?? ''));
+      const endedAt = Date.parse(String(e.content.ended_at ?? ''));
+      const text = e.content.ended_at
+        ? `Звонок завершён${Number.isFinite(startedAt) && Number.isFinite(endedAt) ? ` · ${formatDuration(endedAt - startedAt)}` : ''}`
+        : `Звонок начат: ${name(String(e.content.started_by ?? e.sender))}`;
+      rows.push(<div key={e.eventId} className="system-line">{text}</div>);
+      return;
+    }
     if (e.type !== 'm.room.message') return;
     flush();
     if (e.content.msgtype === 'm.notice') {
@@ -258,8 +297,29 @@ export function ChatView({ client, room, onBack }: { client: MatrixClient; room:
             {members} {members % 10 === 1 && members % 100 !== 11 ? 'участник' : members % 10 >= 2 && members % 10 <= 4 && (members % 100 < 12 || members % 100 > 14) ? 'участника' : 'участников'}
           </div>
         </div>
+        {joined && (
+          <div className="chat-actions">
+            <button className="icon-btn" onClick={() => onCall(false)} aria-label="Аудиозвонок" title="Аудиозвонок" disabled={inCall}>
+              <Icon name="phone" />
+            </button>
+            <button className="icon-btn" onClick={() => onCall(true)} aria-label="Видеозвонок" title="Видеозвонок" disabled={inCall}>
+              <Icon name="video" />
+            </button>
+          </div>
+        )}
       </header>
       {ctx && <CaseBar ctx={ctx} />}
+      {call && !inCall && joined && (
+        <div className="call-banner" role="status">
+          <span className="callbar-dot" />
+          <span>
+            Идёт звонок · начат {formatTime(Date.parse(call.started_at))}, {name(call.started_by)}
+          </span>
+          <button className="primary" onClick={() => onCall(false)}>
+            Присоединиться
+          </button>
+        </div>
+      )}
       <div
         className="timeline"
         ref={scroller}
@@ -275,7 +335,7 @@ export function ChatView({ client, room, onBack }: { client: MatrixClient; room:
         )}
         {rows}
       </div>
-      <Composer client={client} room={room} />
+      <Composer client={client} room={room} requests={ctx?.source === 'LIS'} />
     </>
   );
 }

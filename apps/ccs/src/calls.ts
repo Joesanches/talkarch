@@ -35,7 +35,9 @@ export class CallTokenService {
     if (!members.includes(userId)) throw new ForbiddenError('Пользователь не состоит в комнате');
 
     const room = this.livekitRoomName(roomId, callId);
-    const at = new AccessToken(this.opts.apiKey, this.opts.apiSecret, { identity: userId, ttl: this.opts.ttl ?? '10m' });
+    // Имя в плитке звонка — из профиля Matrix, а не от клиента.
+    const name = (await this.matrix.displayName(userId).catch(() => null)) ?? userId;
+    const at = new AccessToken(this.opts.apiKey, this.opts.apiSecret, { identity: userId, name, ttl: this.opts.ttl ?? '10m' });
     at.addGrant({ roomJoin: true, room, canPublish: true, canSubscribe: true, canPublishData: true });
     return { url: this.opts.url, token: await at.toJwt(), room };
   }

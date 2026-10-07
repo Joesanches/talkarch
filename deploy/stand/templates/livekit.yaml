@@ -1,0 +1,17 @@
+# LiveKit тестового стенда. Сгенерировано ./stand.sh init.
+port: 7880
+logging:
+  level: info
+rtc:
+  tcp_port: 7881
+  # Один UDP-порт для всех медиапотоков — проще открыть в межсетевом экране.
+  udp_port: 7882
+__LIVEKIT_IP__
+turn:
+  # TURN по UDP 3478 — для клиентов за строгим NAT. TURN/TLS — при необходимости, отдельным именем и сертификатом.
+  enabled: true
+  udp_port: 3478
+keys:
+  __LIVEKIT_KEY__: "__LIVEKIT_SECRET__"
+room:
+  empty_timeout: 300

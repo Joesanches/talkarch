@@ -3,6 +3,7 @@ import { NotificationCountType, SyncState, type MatrixClient, type Room } from '
 import { FOLDERS, foldersOf, initials, avatarColor, type Folder } from '../model.ts';
 import { CcsError, directRoomIds, openCase, startClient, useClientUpdates, useSyncState, type Session } from '../matrix.ts';
 import { ChatList } from './ChatList.tsx';
+import { CallPanel } from './CallPanel.tsx';
 import { ChatView } from './ChatView.tsx';
 import { Icon } from './Icon.tsx';
 
@@ -32,6 +33,9 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
   const ready = sync === SyncState.Prepared || sync === SyncState.Syncing || sync === SyncState.Catchup;
   const [folder, setFolder] = useState<Folder>('all');
   const [selected, setSelected] = useState<string | null>(null);
+  // Звонок живёт на уровне оболочки: можно переключаться между чатами, не разрывая связь.
+  const [call, setCall] = useState<{ roomId: string; video: boolean } | null>(null);
+  const [callMinimized, setCallMinimized] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
   const linkHandled = useRef(false);
 
@@ -99,6 +103,21 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
         emptyHint={folder === 'cases' ? 'Чаты случаев появятся, когда вы откроете случай в РИС или ЛИС' : 'Здесь пока пусто'}
       />
       <section className="chat">
+        {call && client.getRoom(call.roomId) && (
+          <CallPanel
+            key={`${call.roomId}-${call.video}`}
+            client={client}
+            session={session}
+            room={client.getRoom(call.roomId)!}
+            video={call.video}
+            minimized={callMinimized || selected !== call.roomId}
+            onMinimize={(min) => {
+              setCallMinimized(min);
+              if (!min) setSelected(call.roomId);
+            }}
+            onLeave={() => setCall(null)}
+          />
+        )}
         {banner && (
           <div className="banner" role="status">
             {banner}
@@ -106,7 +125,17 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
           </div>
         )}
         {current ? (
-          <ChatView key={current.roomId} client={client} room={current} onBack={() => setSelected(null)} />
+          <ChatView
+            key={current.roomId}
+            client={client}
+            room={current}
+            onBack={() => setSelected(null)}
+            inCall={call?.roomId === current.roomId}
+            onCall={(video) => {
+              setCall({ roomId: current.roomId, video });
+              setCallMinimized(false);
+            }}
+          />
         ) : (
           <div className="chat-empty">
             <p>Выберите чат слева или откройте случай из РИС или ЛИС</p>

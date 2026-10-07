@@ -9,7 +9,7 @@ import {
   type MatrixEvent,
   type Room,
 } from 'matrix-js-sdk';
-import { CCS_URL, HS_URL } from './config.ts';
+import { config } from './config.ts';
 import type { TimelineItem } from './model.ts';
 
 export interface Session {
@@ -48,14 +48,14 @@ export function clearSession() {
 }
 
 export async function login(username: string, password: string): Promise<Session> {
-  const tmp = createClient({ baseUrl: HS_URL });
+  const tmp = createClient({ baseUrl: config.hsUrl });
   const r = await tmp.loginRequest({
     type: 'm.login.password',
     identifier: { type: 'm.id.user', user: username.trim() },
     password,
     initial_device_display_name: 'Консилиум · веб',
   });
-  return { baseUrl: HS_URL, userId: r.user_id, accessToken: r.access_token, deviceId: r.device_id };
+  return { baseUrl: config.hsUrl, userId: r.user_id, accessToken: r.access_token, deviceId: r.device_id };
 }
 
 export function startClient(s: Session): MatrixClient {
@@ -131,7 +131,7 @@ export class CcsError extends Error {
 
 /** Открыть чат случая через сервис контекста: проверка прав в РИС/ЛИС, комната, приглашение. */
 export async function openCase(s: Session, connector: string, caseId: string): Promise<{ roomId: string; membership: string }> {
-  const res = await fetch(`${CCS_URL}/api/v1/cases/open`, {
+  const res = await fetch(`${config.ccsUrl}/api/v1/cases/open`, {
     method: 'POST',
     headers: { authorization: `Bearer ${s.accessToken}`, 'content-type': 'application/json' },
     body: JSON.stringify({ connector, caseId }),

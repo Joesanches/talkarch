@@ -1,0 +1,53 @@
+# Единая точка входа стенда: HTTPS, веб-клиент, Synapse, сервис контекста, сигнализация LiveKit.
+# DOMAIN и TLS_MODE (acme | internal) — из deploy/stand/.env; global.caddy (email для ACME) генерирует ./stand.sh init.
+{
+	import global.caddy
+}
+
+{$DOMAIN} {
+	import tls-{$TLS_MODE:acme}.caddy
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(self), microphone=(self), display-capture=(self)"
+		-Server
+	}
+
+	# Обнаружение сервера для сторонних Matrix-клиентов (например, Element) — проверка совместимости.
+	handle /.well-known/matrix/client {
+		header Content-Type application/json
+		header Access-Control-Allow-Origin *
+		respond `{"m.homeserver":{"base_url":"https://{$DOMAIN}"}}`
+	}
+
+	# Matrix Client-Server API. Admin API Synapse (/_synapse/admin) наружу не публикуется.
+	handle /_matrix/* {
+		reverse_proxy synapse:8008
+	}
+	handle /_synapse/client/* {
+		reverse_proxy synapse:8008
+	}
+
+	# Сервис контекста: API клиентов и API интеграции для РИС/ЛИС (по токенам подключений).
+	handle /api/* {
+		reverse_proxy ccs:8080
+	}
+	handle /integration/* {
+		reverse_proxy ccs:8080
+	}
+
+	# Сигнализация звонков (WebSocket). Медиа идёт напрямую на LiveKit: UDP 7882, TCP 7881, TURN UDP 3478.
+	handle_path /livekit/* {
+		reverse_proxy livekit:7880
+	}
+
+	# Веб-клиент; адреса серверов — в /config.json.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

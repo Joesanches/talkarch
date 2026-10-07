@@ -1,0 +1,51 @@
+# Synapse тестового стенда. Сгенерировано ./stand.sh init из deploy/stand/templates — правьте шаблон, не этот файл.
+server_name: "__DOMAIN__"
+public_baseurl: "https://__DOMAIN__/"
+pid_file: /data/homeserver.pid
+signing_key_path: /data/signing.key
+media_store_path: /data/media_store
+log_config: /config/log.yaml
+report_stats: false
+suppress_key_server_warning: true
+trusted_key_servers: []
+
+listeners:
+  - port: 8008
+    type: http
+    tls: false
+    x_forwarded: true
+    bind_addresses: ["0.0.0.0"]
+    resources:
+      - names: [client]
+        compress: false
+
+database:
+  name: psycopg2
+  args:
+    user: synapse
+    password: "__PG_PASSWORD__"
+    database: synapse
+    host: postgres
+    cp_min: 2
+    cp_max: 10
+
+# Учётные записи создаёт только администратор стенда (./stand.sh users / add-user).
+enable_registration: false
+registration_shared_secret: "__REG_SECRET__"
+macaroon_secret_key: "__MACAROON_SECRET__"
+form_secret: "__FORM_SECRET__"
+
+app_service_config_files:
+  - /config/appservice-ccs.yaml
+
+# Стенд изолирован: федерации нет, предпросмотр ссылок выключен.
+federation_domain_whitelist: []
+url_preview_enabled: false
+max_upload_size: 50M
+
+# Тестировщики часто выходят в интернет с одного адреса (NAT больницы): лимит входов по адресу мягче умолчаний
+# (5 входов, затем 1 раз в ~5 минут). Защита от подбора пароля — лимит неудачных попыток.
+rc_login:
+  address: { per_second: 0.5, burst_count: 30 }
+  account: { per_second: 0.05, burst_count: 10 }
+  failed_attempts: { per_second: 0.05, burst_count: 5 }

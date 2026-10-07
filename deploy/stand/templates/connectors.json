@@ -1,0 +1,27 @@
+{
+  "$comment": "Подключения стенда. Сгенерировано ./stand.sh init; токены — в deploy/stand/.env, здесь только их SHA-256.",
+  "connectors": [
+    {
+      "id": "lis",
+      "kind": "LIS",
+      "org": "stand",
+      "title": "ЛИС патоморфологии (песочница)",
+      "token_sha256": "__LIS_TOKEN_SHA__",
+      "callbacks": { "url": "http://host-mock:8090/lis", "token": "__LIS_CALLBACK_TOKEN__" }
+    },
+    {
+      "id": "ris",
+      "kind": "RIS",
+      "org": "stand",
+      "title": "РИС (песочница)",
+      "token_sha256": "__RIS_TOKEN_SHA__"
+    },
+    {
+      "id": "team",
+      "kind": "LIS",
+      "org": "stand",
+      "title": "РИС/ЛИС команды разработки",
+      "token_sha256": "__TEAM_TOKEN_SHA__"
+    }
+  ]
+}

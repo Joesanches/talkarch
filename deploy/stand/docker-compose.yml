@@ -1,0 +1,129 @@
+# Тестовый стенд «Консилиума». Запуск — через ./stand.sh (он генерирует .env и generated/).
+name: konsilium-stand
+
+x-app: &app
+  image: konsilium-stand-app:latest
+  build:
+    context: ../..
+    dockerfile: deploy/stand/Dockerfile
+    target: app
+    secrets: [build_ca]
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: synapse
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?запустите ./stand.sh init}
+      POSTGRES_DB: synapse
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synapse"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  synapse-keys:
+    image: matrixdotorg/synapse:v1.162.0
+    entrypoint: ["python", "-m", "synapse.app.homeserver"]
+    command: ["-c", "/config/homeserver.yaml", "--generate-keys"]
+    volumes:
+      - ./generated/synapse:/config:ro
+      - synapse-data:/data
+
+  synapse:
+    image: matrixdotorg/synapse:v1.162.0
+    restart: unless-stopped
+    entrypoint: ["python", "-m", "synapse.app.homeserver"]
+    command: ["-c", "/config/homeserver.yaml"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      synapse-keys: { condition: service_completed_successfully }
+    volumes:
+      - ./generated/synapse:/config:ro
+      - synapse-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8008/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+
+  livekit:
+    image: livekit/livekit-server:v1.13
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit.yaml"]
+    volumes:
+      - ./generated/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7881:7881/tcp"
+      - "7882:7882/udp"
+      - "3478:3478/udp"
+
+  ccs:
+    <<: *app
+    command: ["node", "--import", "tsx", "apps/ccs/src/index.ts"]
+    env_file: ./generated/ccs.env
+    volumes:
+      - ./generated/connectors.json:/config/connectors.json:ro
+    depends_on:
+      synapse: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  host-mock:
+    <<: *app
+    command: ["node", "--import", "tsx", "apps/host-mock/src/index.ts"]
+    env_file: ./generated/host-mock.env
+    depends_on:
+      ccs: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8090/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  web:
+    image: konsilium-stand-web:latest
+    build:
+      context: ../..
+      dockerfile: deploy/stand/Dockerfile
+      target: web
+      secrets: [build_ca]
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+      TLS_MODE: ${TLS_MODE:-acme}
+    volumes:
+      - ./generated/config.json:/srv/config.json:ro
+      - ./generated/caddy-global.caddy:/etc/caddy/global.caddy:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      ccs: { condition: service_healthy }
+
+secrets:
+  # Корневой сертификат корпоративного прокси для сборки (если нужен): BUILD_CA_FILE=/путь/к/ca.crt в .env.
+  build_ca:
+    file: ${BUILD_CA_FILE:-/dev/null}
+
+volumes:
+  pgdata: {}
+  synapse-data: {}
+  caddy-data: {}
+  caddy-config: {}

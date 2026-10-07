@@ -10,6 +10,14 @@ const paths: Record<string, string> = {
   logout: 'M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10',
   external: 'M14 4h6v6M20 4l-9 9M18 14v6H4V6h6',
   check: 'M5 12l4 4 10-10',
+  phone: 'M5 4h3l2 5-2.5 1.5a11 11 0 0 0 6 6L15 14l5 2v3a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z',
+  video: 'M3 7h12v10H3zM15 10l6-3v10l-6-3',
+  mic: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3',
+  'mic-off': 'M15 9.5V6a3 3 0 0 0-5.7-1.3M9 9v3a3 3 0 0 0 4.6 2.5M5 11a7 7 0 0 0 11.5 5.4M19 11a7 7 0 0 1-.6 2.8M12 18v3M3 3l18 18',
+  'video-off': 'M3 7h3m4 0h5v5m0 5H3V7M15 10l6-3v10l-6-3M3 3l18 18',
+  screen: 'M3 5h18v11H3zM8 20h8M12 16v4M12 13V8M9.5 10.5L12 8l2.5 2.5',
+  hangup: 'M3 15c5-5 13-5 18 0l-2 3-4-1.5v-2.5a10 10 0 0 0-6 0v2.5L5 18z',
+  minimize: 'M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7',
 };
 
 export function Icon({ name, size = 22 }: { name: keyof typeof paths | string; size?: number }) {

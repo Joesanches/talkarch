@@ -1,15 +1,11 @@
-import { expect, test, type Page } from '@playwright/test';
-import { MsgType } from '@konsilium/protocol';
-import { PASSWORD } from './global-setup.ts';
+import { expect, test } from '@playwright/test';
+import { DEV_PASSWORD as PASSWORD } from '@konsilium/host-mock/users';
 
 const CASE = 'Г26-04512';
-const HS = 'http://localhost:8008';
-const CCS = 'http://localhost:8080';
+// По умолчанию — окружение разработчика; для стенда адреса и токен задаёт playwright.stand.config.ts.
+const CCS = process.env.E2E_CCS_URL ?? 'http://localhost:8080';
+const LIS_TOKEN = process.env.E2E_LIS_TOKEN ?? 'dev-only-lis-token-0123456789abcdef';
 const SHOTS = process.env.E2E_SCREENSHOTS;
-
-async function session(page: Page) {
-  return page.evaluate(() => JSON.parse(localStorage.getItem('konsilium.session') ?? 'null') as { accessToken: string });
-}
 
 test('врач открывает чат случая по ссылке из ЛИС, видит карточку, пишет, получает заявку и уведомление', async ({ page }) => {
   await test.step('вход по ссылке /c/lis/{номер}', async () => {
@@ -37,34 +33,24 @@ test('врач открывает чат случая по ссылке из Л�
     await expect(page.locator('.msg.out .meta').last()).not.toHaveText('отправка…');
   });
 
-  await test.step('заявка ИГХ: карточка проходит этапы до «Готово»', async () => {
-    const { accessToken } = await session(page);
-    const open = await fetch(`${CCS}/api/v1/cases/open`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ connector: 'lis', caseId: CASE }),
-    });
-    const { roomId } = (await open.json()) as { roomId: string };
-    // Поле быстрых действий («Запрос ИГХ») — шаг 3; пока отправляем карточку заявки через API Matrix.
-    const send = await fetch(`${HS}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/e2e-${Date.now()}`, {
-      method: 'PUT',
-      headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        msgtype: MsgType.Request,
-        body: 'Запрос ИГХ: блок 1А — ER, PR, HER2/neu, Ki-67 (срочно)',
-        [MsgType.Request]: { kind: 'ihc', block: '1А', items: ['ER', 'PR', 'HER2/neu', 'Ki-67'], priority: 'urgent' },
-      }),
-    });
-    expect(send.ok).toBe(true);
+  await test.step('заявка ИГХ из формы: карточка проходит этапы до «Готово»', async () => {
+    await page.getByRole('button', { name: '+ Заявка в ЛИС' }).click();
+    const form = page.getByRole('form', { name: 'Новая заявка' });
+    await form.getByLabel('Блок').fill('1А');
+    for (const m of ['ER', 'PR', 'HER2/neu', 'Ki-67']) await form.getByText(m, { exact: true }).click();
+    await form.getByRole('radio', { name: 'Срочно' }).click();
+    await form.getByRole('button', { name: 'Отправить в ЛИС' }).click();
+    await expect(form).toBeHidden();
     const card = page.getByLabel('Заявка').last();
+    await expect(card).toContainText('Запрос ИГХ: блок 1А — ER, PR, HER2/neu, Ki-67 (срочно)');
     await expect(card).toContainText(/ИГХ-\d+/);
-    await expect(card.locator('.steps li.current')).toHaveText('Готово', { timeout: 15_000 });
+    await expect(card.locator('.steps li.current')).toHaveText('Готово', { timeout: 30_000 });
   });
 
   await test.step('уведомление ЛИС с кнопкой', async () => {
     const res = await fetch(`${CCS}/integration/v1/events`, {
       method: 'POST',
-      headers: { authorization: 'Bearer dev-only-lis-token-0123456789abcdef', 'content-type': 'application/cloudevents+json' },
+      headers: { authorization: `Bearer ${LIS_TOKEN}`, 'content-type': 'application/cloudevents+json' },
       body: JSON.stringify({
         specversion: '1.0',
         id: `e2e-${Date.now()}`,

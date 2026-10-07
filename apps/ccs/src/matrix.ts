@@ -33,6 +33,8 @@ export interface MatrixApi {
   getState<T = Record<string, unknown>>(roomId: string, type: string, stateKey?: string): Promise<T | null>;
   sendState(roomId: string, type: string, stateKey: string, content: Record<string, unknown>): Promise<string>;
   sendEvent(roomId: string, type: string, content: Record<string, unknown>, txnId?: string): Promise<string>;
+  /** Отображаемое имя из профиля; `null`, если не задано. */
+  displayName(userId: string): Promise<string | null>;
   /** Matrix ID владельца пользовательского токена. */
   whoami(userAccessToken: string): Promise<string>;
   /** Участники комнаты (join) глазами пользователя — проверка членства его же токеном. */
@@ -135,6 +137,16 @@ export class HttpMatrixApi implements MatrixApi {
     const json = (await res.json().catch(() => ({}))) as { duration_ms?: number; errcode?: string; error?: string };
     if (!res.ok) throw new MatrixError(res.status, json.errcode ?? 'M_UNKNOWN', json.error ?? res.statusText);
     return json.duration_ms ?? 0;
+  }
+
+  async displayName(userId: string): Promise<string | null> {
+    try {
+      const r = await this.call<{ displayname?: string }>('GET', `/profile/${enc(userId)}/displayname`);
+      return r.displayname ?? null;
+    } catch (e) {
+      if (e instanceof MatrixError && e.status === 404) return null;
+      throw e;
+    }
   }
 
   async setBotDisplayName(name: string): Promise<void> {

@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { themeCss } from '@konsilium/tokens/theme';
 import { App } from './App.tsx';
+import { loadRuntimeConfig } from './config.ts';
 import './styles.css';
 
 // Тема из дизайн-токенов. Акцент можно передать в адресе (?accent=0E7C6B) — так же его передаст хост через SDK.
@@ -15,6 +16,8 @@ try {
   style.textContent = themeCss();
 }
 document.head.append(style);
+
+await loadRuntimeConfig();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

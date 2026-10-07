@@ -139,11 +139,13 @@ describe('POST /api/v1/calls/token', () => {
 
     expect((await call('smirnova')).statusCode).toBe(403); // приглашена, но ещё не вошла
     h.matrix.join(roomId, mx('smirnova'));
+    h.matrix.profiles.set(mx('smirnova'), 'Смирнова А. В.');
     const ok = await call('smirnova');
     expect(ok.statusCode).toBe(200);
     const { token, room } = ok.json();
     const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
     expect(payload.sub).toBe(mx('smirnova'));
+    expect(payload.name).toBe('Смирнова А. В.');
     expect(payload.video).toMatchObject({ roomJoin: true, room });
     expect(room).toMatch(/^call-[0-9a-f]{24}$/);
     expect((await call('outsider')).statusCode).toBe(403);

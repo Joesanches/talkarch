@@ -27,12 +27,19 @@ const chromium = '/opt/pw-browsers/chromium';
 export default defineConfig({
   testDir: 'e2e',
   timeout: 60_000,
+  // Сценарии работают в одном чате случая — по очереди.
+  workers: 1,
   globalSetup: './e2e/global-setup.ts',
   use: {
     baseURL: 'http://localhost:5173',
     locale: 'ru-RU',
     viewport: { width: 1360, height: 860 },
-    launchOptions: existsSync(chromium) ? { executablePath: chromium } : {},
+    // Тестовые камера и микрофон Chromium — для сквозного теста звонков.
+    permissions: ['microphone', 'camera'],
+    launchOptions: {
+      args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
+      ...(existsSync(chromium) ? { executablePath: chromium } : {}),
+    },
   },
   webServer: [
     { command: 'pnpm --filter @konsilium/ccs start', url: 'http://127.0.0.1:8080/healthz', env: devEnv, reuseExistingServer: false, timeout: 60_000 },

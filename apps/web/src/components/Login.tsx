@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { HS_URL } from '../config.ts';
+import { config } from '../config.ts';
 import { login, type Session } from '../matrix.ts';
 
 export function Login({ onLogin }: { onLogin: (s: Session) => void }) {
@@ -14,8 +14,16 @@ export function Login({ onLogin }: { onLogin: (s: Session) => void }) {
     setError(null);
     try {
       onLogin(await login(username, password));
-    } catch {
-      setError('Не удалось войти: проверьте логин и пароль');
+    } catch (err) {
+      const e = err as { errcode?: string; data?: { retry_after_ms?: number } };
+      if (e.errcode === 'M_LIMIT_EXCEEDED') {
+        const sec = Math.ceil((e.data?.retry_after_ms ?? 60_000) / 1000);
+        setError(`Слишком много попыток входа. Повторите через ${sec} с`);
+      } else if (e.errcode === 'M_FORBIDDEN') {
+        setError('Неверный логин или пароль');
+      } else {
+        setError('Сервер недоступен, попробуйте позже');
+      }
     } finally {
       setBusy(false);
     }
@@ -39,7 +47,7 @@ export function Login({ onLogin }: { onLogin: (s: Session) => void }) {
         <button className="primary" type="submit" disabled={busy}>
           {busy ? 'Вход…' : 'Войти'}
         </button>
-        <p className="meta">Сервер: {HS_URL}</p>
+        <p className="meta">Сервер: {config.hsUrl}</p>
       </form>
     </main>
   );

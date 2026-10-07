@@ -1,0 +1,15 @@
+# Регистрация сервиса клинического контекста. Сгенерировано ./stand.sh init.
+id: konsilium-ccs
+url: http://ccs:8080
+as_token: "__AS_TOKEN__"
+hs_token: "__HS_TOKEN__"
+sender_localpart: ccs
+rate_limited: false
+namespaces:
+  users:
+    - exclusive: true
+      regex: '@ccs(-[a-z0-9._-]+)?:__DOMAIN_RE__'
+  aliases:
+    - exclusive: true
+      regex: '#c-[0-9a-f]+:__DOMAIN_RE__'
+  rooms: []

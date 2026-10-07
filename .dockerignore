@@ -1,0 +1,11 @@
+# Контекст сборки образов стенда (deploy/stand/Dockerfile): только исходники.
+**/node_modules
+**/dist
+**/coverage
+**/test-results
+**/playwright-report
+.git
+infra/.data
+deploy/stand/.env
+deploy/stand/generated
+**/*.log

@@ -16,7 +16,7 @@ const mock = createHostMock({
   ],
 });
 
-await mock.app.listen({ host: '127.0.0.1', port });
+await mock.app.listen({ host: env.HOST_MOCK_HOST ?? '127.0.0.1', port });
 
 // Сервис контекста может стартовать позже — повторяем отправку, пока не ответит.
 for (let attempt = 1; attempt <= 30; attempt++) {

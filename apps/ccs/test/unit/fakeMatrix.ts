@@ -12,6 +12,7 @@ export class FakeMatrix implements MatrixApi {
   readonly rooms = new Map<string, FakeRoom>();
   readonly aliases = new Map<string, string>();
   readonly tokens = new Map<string, string>();
+  readonly profiles = new Map<string, string>();
   createCalls = 0;
   /** Искусственная задержка createRoom — чтобы проверить параллельные вызовы. */
   createDelayMs = 0;
@@ -115,6 +116,10 @@ export class FakeMatrix implements MatrixApi {
     const eventId = `$event${room.events.length + 1}.${room.id}`;
     room.events.push({ type, content, txnId, eventId });
     return eventId;
+  }
+
+  async displayName(userId: string) {
+    return this.profiles.get(userId) ?? null;
   }
 
   async whoami(token: string) {

@@ -47,13 +47,19 @@
 
 Идёт этап 0 (PoC). План и статус — в [docs/09-dev-plan.md](docs/09-dev-plan.md), запуск окружения — в [infra/README.md](infra/README.md).
 
+**Тестовый стенд** (чат, чаты случаев, звонки, песочница РИС/ЛИС, API интеграции) разворачивается на любой Linux-машине с Docker и доменом — инструкция в [deploy/stand/README.md](deploy/stand/README.md):
+
+```bash
+cd deploy/stand && ./stand.sh init chat-test.example.ru admin@example.ru && ./stand.sh up && ./stand.sh users
+```
+
 ```bash
 pnpm install
 pnpm test                               # модульные тесты (77)
 cd infra && docker compose up -d && cd ..
 pnpm dev:users                          # пользователи стенда (пароль dev-only-password-1)
 pnpm test:it                            # интеграционные тесты на Synapse (12)
-pnpm e2e                                # сквозные тесты веб-клиента в браузере (2)
+pnpm e2e                                # сквозные тесты в браузере, включая звонок двух участников (3)
 ```
 
 | Каталог | Что внутри |
@@ -61,7 +67,8 @@ pnpm e2e                                # сквозные тесты веб-к�
 | `apps/ccs` | Сервис клинического контекста: Matrix Application Service и API интеграции с РИС/ЛИС |
 | `apps/ccs/openapi` | Контракты OpenAPI: API интеграции и обратные вызовы в РИС/ЛИС |
 | `apps/host-mock` | Песочница РИС/ЛИС — эталон стороны РИС/ЛИС в интеграции; пользователи стенда |
-| `apps/web` | Веб-клиент: список чатов с папками, чат случая с карточкой, заявки, уведомления РИС/ЛИС |
+| `apps/web` | Веб-клиент: список чатов с папками, чат случая с карточкой, заявки в ЛИС, уведомления, аудио- и видеозвонки |
+| `deploy/stand` | Тестовый стенд: развёртывание одной командой на машине с доменом |
 | `packages/protocol` | Типы и схемы событий «чата случая» и API интеграции |
 | `packages/tokens` | Дизайн-токены и проверка контраста |
 | `infra` | Окружение разработчика: PostgreSQL, Synapse, LiveKit |
