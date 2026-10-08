@@ -290,6 +290,24 @@ async function main() {
     results[name] = { batch_of_50: rec.summary(), events_per_s: Math.round((n / (performance.now() - t0)) * 1000) };
   }
 
+  // C0. Отправка без клиентов синхронизации: базовая задержка записи сообщения (диск, база) без раздачи.
+  const regularRooms = withChat;
+  let seq = 0;
+  const baselineRate = MSG_RATES[0]!;
+  log(`C0: ${baselineRate} сообщений/с без клиентов синхронизации, ${STEP_S} с`);
+  const baseline = new Recorder();
+  await paced(baselineRate * STEP_S, baselineRate, async () => {
+    const c = regularRooms[(seq * 104729) % regularRooms.length]!;
+    const sender = regular[c.members[seq % ROOM_SIZE]!]!;
+    const body = `base:${RUN}:${seq++}`;
+    const r = await hs
+      .call('PUT', `/_matrix/client/v3/rooms/${encodeURIComponent(c.roomId!)}/send/m.room.message/${encodeURIComponent(body)}`, sender.token, { msgtype: 'm.text', body })
+      .catch(() => ({ status: 0, ms: 0 }));
+    if (r.status === 200) baseline.ok(r.ms);
+    else baseline.fail(`http ${r.status}`);
+  });
+  results.C0_send_without_clients = { rate_per_s: baselineRate, send: baseline.summary() };
+
   // D1. Холодный старт по одному (стенд без нагрузки): первая синхронизация с фильтром веб-клиента.
   const coldIdle = new Recorder();
   for (let i = 0; i < 20; i++) {
@@ -341,8 +359,6 @@ async function main() {
   while (ready < USERS) await sleep(200);
   results.D1_cold_start_regular = { rooms_per_user: ROOMS_PER_USER, one_by_one: coldIdle.summary(), all_at_once: coldRegular.summary() };
 
-  const regularRooms = withChat;
-  let seq = 0;
   const steps: unknown[] = [];
   for (const [step, rate] of MSG_RATES.entries()) {
     const count = rate * STEP_S;
@@ -384,6 +400,7 @@ async function main() {
   // D2. Холодный старт пользователя с HEAVY_ROOMS комнатами: обычная синхронизация и Simplified Sliding Sync.
   log(`D2: холодный старт «тяжёлых» пользователей (${HEAVY_ROOMS} комнат)`);
   const coldHeavy = new Recorder();
+  const coldHeavyFirst = new Recorder();
   const sizes: number[] = [];
   const sss = new Recorder();
   let sssStatus = 0;
@@ -391,7 +408,8 @@ async function main() {
     for (const u of heavy) {
       const r = await hs.call<any>('GET', `/_matrix/client/v3/sync?filter=${encodeURIComponent(CLIENT_FILTER)}&timeout=0`, u.token);
       if (r.status === 200) {
-        coldHeavy.ok(r.ms);
+        // Первый запрос — по-настоящему холодный; повтор той же первой синхронизации Synapse отдаёт из кеша ответов.
+        (rep === 0 ? coldHeavyFirst : coldHeavy).ok(r.ms);
         sizes.push(Object.keys(r.json.rooms?.join ?? {}).length);
       } else coldHeavy.fail(`http ${r.status}`);
       const s = await hs.call<any>('POST', '/_matrix/client/unstable/org.matrix.simplified_msc3575/sync?timeout=0', u.token, {
@@ -404,7 +422,8 @@ async function main() {
   }
   results.D2_cold_start_heavy = {
     rooms_per_user: Math.max(...sizes),
-    initial_sync: coldHeavy.summary(),
+    initial_sync_first: coldHeavyFirst.summary(),
+    initial_sync_repeat_cached: coldHeavy.summary(),
     sliding_sync_first_20: sssStatus === 200 ? sss.summary() : { unsupported: sssStatus },
   };
 

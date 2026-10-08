@@ -18,6 +18,7 @@
 | [docs/08-video-ai.md](docs/08-video-ai.md) | Jitsi и LiveKit — сравнение; вебинары, запись, распознавание речи, ИИ-резюме и другие ИИ-функции; правила для ИИ в медицине |
 | [docs/04-embedding.md](docs/04-embedding.md) | SDK встраивания: режимы, API, протокол `postMessage`, SSO, стандарты (IHE IID, DICOMweb, FHIR) |
 | [docs/10-integration-api.md](docs/10-integration-api.md) | **API интеграции с РИС/ЛИС** для другой команды и сторонних производителей: события, обратные вызовы, уровни, адаптеры HL7 v2 и FHIR, чек-лист. Контракты OpenAPI — в `apps/ccs/openapi` |
+| [docs/11-load-test.md](docs/11-load-test.md) | **Нагрузочный тест PoC:** результаты против целей, узкие места (однопроцессный Synapse, массовое переподключение), что дальше. Инструмент — `tools/load` |
 | [docs/05-ux.md](docs/05-ux.md) | Соответствие функциям Telegram, медицинские адаптации, экраны, поведение, доступность |
 | [docs/06-design-system.md](docs/06-design-system.md) | Дизайн-система и переход на корпоративный стиль |
 | [design/tokens.json](design/tokens.json) | Дизайн-токены (цвета, шрифты, радиусы, отступы, пресеты, тёмная тема) |

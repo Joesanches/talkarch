@@ -1,0 +1,278 @@
+{
+  "run": "r2",
+  "started_at": "2026-10-08T17:48:59.911Z",
+  "params": {
+    "USERS": 60,
+    "ROOMS_PER_USER": 5,
+    "CREATE_RATE": 0.5,
+    "BURST": 20,
+    "BURST_RATE": 1,
+    "HEAVY": 1,
+    "HEAVY_ROOMS": 50,
+    "EVENTS": 500,
+    "MSG_RATES": [
+      2,
+      5
+    ],
+    "STEP_S": 60
+  },
+  "users": {
+    "registration": {
+      "n": 61,
+      "errors": 0,
+      "p50": 868,
+      "p95": 993,
+      "p99": 1056,
+      "max": 1056,
+      "mean": 875
+    }
+  },
+  "A1_case_snapshots": {
+    "batch_of_100": {
+      "n": 2,
+      "errors": 0,
+      "p50": 138,
+      "p95": 634,
+      "p99": 634,
+      "max": 634,
+      "mean": 386
+    },
+    "events_per_s": 155
+  },
+  "A2_chat_creation_paced": {
+    "rate_per_s": 0.5,
+    "duration_s": 199,
+    "all": {
+      "n": 100,
+      "errors": 0,
+      "p50": 629,
+      "p95": 849,
+      "p99": 1010,
+      "max": 1074,
+      "mean": 661
+    },
+    "first_10pct": {
+      "n": 10,
+      "errors": 0,
+      "p50": 810,
+      "p95": 1074,
+      "p99": 1074,
+      "max": 1074,
+      "mean": 861
+    },
+    "last_10pct": {
+      "n": 10,
+      "errors": 0,
+      "p50": 558,
+      "p95": 828,
+      "p99": 828,
+      "max": 828,
+      "mean": 587
+    },
+    "ccs_cpu_pct": 1,
+    "containers_mid": {
+      "synapse": "3.65% · 656.6MiB",
+      "postgres": "0.23% · 356.2MiB"
+    }
+  },
+  "A3_chat_creation_peak": {
+    "offered_rate_per_s": 1,
+    "achieved_rooms_per_s": 1,
+    "offered_s": 20,
+    "all": {
+      "n": 20,
+      "errors": 0,
+      "p50": 566,
+      "p95": 1126,
+      "p99": 1137,
+      "max": 1137,
+      "mean": 649
+    },
+    "first_10pct": {
+      "n": 2,
+      "errors": 0,
+      "p50": 531,
+      "p95": 545,
+      "p99": 545,
+      "max": 545,
+      "mean": 538
+    },
+    "last_10pct": {
+      "n": 2,
+      "errors": 0,
+      "p50": 567,
+      "p95": 588,
+      "p99": 588,
+      "max": 588,
+      "mean": 577
+    },
+    "containers_mid": {
+      "synapse": "0.64% · 656.5MiB",
+      "postgres": "0.22% · 360.7MiB"
+    }
+  },
+  "joins": {
+    "n": 410,
+    "errors": 0,
+    "p50": 806,
+    "p95": 1359,
+    "p99": 2050,
+    "max": 2290,
+    "mean": 837
+  },
+  "B1_notifications": {
+    "batch_of_50": {
+      "n": 10,
+      "errors": 0,
+      "p50": 1371,
+      "p95": 1886,
+      "p99": 1886,
+      "max": 1886,
+      "mean": 1478
+    },
+    "events_per_s": 34
+  },
+  "B2_case_updates": {
+    "batch_of_50": {
+      "n": 3,
+      "errors": 0,
+      "p50": 3232,
+      "p95": 3433,
+      "p99": 3433,
+      "max": 3433,
+      "mean": 2646
+    },
+    "events_per_s": 15
+  },
+  "C0_send_without_clients": {
+    "rate_per_s": 2,
+    "send": {
+      "n": 120,
+      "errors": 0,
+      "p50": 64,
+      "p95": 74,
+      "p99": 86,
+      "max": 119,
+      "mean": 65
+    }
+  },
+  "D1_cold_start_regular": {
+    "rooms_per_user": 5,
+    "one_by_one": {
+      "n": 20,
+      "errors": 0,
+      "p50": 785,
+      "p95": 893,
+      "p99": 943,
+      "max": 943,
+      "mean": 718
+    },
+    "all_at_once": {
+      "n": 60,
+      "errors": 0,
+      "p50": 17745,
+      "p95": 20794,
+      "p99": 20807,
+      "max": 20807,
+      "mean": 12791
+    }
+  },
+  "C_message_delivery": {
+    "clients": 60,
+    "steps": [
+      {
+        "rate_per_s": 2,
+        "duration_s": 60,
+        "send": {
+          "n": 120,
+          "errors": 0,
+          "p50": 65,
+          "p95": 81,
+          "p99": 182,
+          "max": 190,
+          "mean": 70
+        },
+        "delivery": {
+          "n": 240,
+          "errors": 0,
+          "p50": 90,
+          "p95": 108,
+          "p99": 275,
+          "max": 283,
+          "mean": 98
+        },
+        "delivered_pct": 100,
+        "ccs_cpu_pct": 0,
+        "containers_mid": {
+          "synapse": "3.67% · 650.6MiB",
+          "postgres": "0.23% · 374MiB"
+        }
+      },
+      {
+        "rate_per_s": 5,
+        "duration_s": 60,
+        "send": {
+          "n": 300,
+          "errors": 0,
+          "p50": 68,
+          "p95": 327,
+          "p99": 810,
+          "max": 1298,
+          "mean": 100
+        },
+        "delivery": {
+          "n": 600,
+          "errors": 0,
+          "p50": 95,
+          "p95": 479,
+          "p99": 925,
+          "max": 1358,
+          "mean": 134
+        },
+        "delivered_pct": 100,
+        "ccs_cpu_pct": 1,
+        "containers_mid": {
+          "synapse": "3.86% · 650.6MiB",
+          "postgres": "3.16% · 374.1MiB"
+        }
+      }
+    ]
+  },
+  "D2_cold_start_heavy": {
+    "rooms_per_user": 250,
+    "initial_sync_first": {
+      "n": 1,
+      "errors": 0,
+      "p50": 6571,
+      "p95": 6571,
+      "p99": 6571,
+      "max": 6571,
+      "mean": 6571
+    },
+    "initial_sync_repeat_cached": {
+      "n": 2,
+      "errors": 0,
+      "p50": 179,
+      "p95": 207,
+      "p99": 207,
+      "max": 207,
+      "mean": 193
+    },
+    "sliding_sync_first_20": {
+      "n": 3,
+      "errors": 0,
+      "p50": 71,
+      "p95": 160,
+      "p99": 160,
+      "max": 160,
+      "mean": 100
+    }
+  },
+  "database": {
+    "synapse_db": "252 MB",
+    "rooms": "2020",
+    "events": "40100",
+    "users": "245"
+  },
+  "finished_at": "2026-10-08T17:57:29.831Z"
+}
