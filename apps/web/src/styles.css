@@ -1012,3 +1012,105 @@ button:disabled {
   text-align: center;
   color: var(--color-neutral-text-meta);
 }
+
+/* ── Данные пациента и реакции-статусы ─────────────────────────────── */
+.link {
+  border: 0;
+  background: transparent;
+  padding: 0 2px;
+  color: var(--color-accent-text);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.patient-revealed b {
+  color: var(--color-neutral-text);
+}
+.patient-revealed .link {
+  margin-left: 6px;
+}
+.reveal-error {
+  margin-left: 6px;
+  color: var(--color-semantic-critical-text);
+}
+.msg {
+  position: relative;
+  align-items: flex-end;
+  gap: 4px;
+}
+.msg.out {
+  flex-direction: row-reverse;
+}
+.reactions {
+  clear: both;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-top: 6px;
+}
+.reaction {
+  border: 1px solid var(--color-neutral-border-strong);
+  background: var(--color-neutral-surface);
+  border-radius: 999px;
+  padding: 1px 9px;
+  font-size: 12.5px;
+  color: var(--color-neutral-text-secondary);
+}
+.reaction b {
+  font-weight: 600;
+}
+.reaction.mine {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
+}
+.reaction.срочно {
+  color: var(--color-semantic-critical-text);
+}
+.reaction.вопрос {
+  color: var(--color-semantic-warning-text);
+}
+.reaction-picker {
+  /* Меню позиционируется от строки сообщения (.msg) — по краю пузыря, а не от кнопки. */
+  position: static;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.msg:hover .reaction-picker,
+.reaction-picker:focus-within {
+  opacity: 1;
+}
+@media (hover: none) {
+  .reaction-picker {
+    opacity: 0.7;
+  }
+}
+.reaction-toggle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--color-neutral-surface);
+  color: var(--color-neutral-icon-muted);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 1px 2px rgb(22 32 43 / 0.12);
+}
+.reaction-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  z-index: 3;
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 999px;
+  background: var(--color-neutral-surface);
+  box-shadow: 0 6px 20px rgb(22 32 43 / 0.16);
+}
+.msg.in .reaction-menu {
+  left: 0;
+}
+.msg.out .reaction-menu {
+  right: 0;
+}

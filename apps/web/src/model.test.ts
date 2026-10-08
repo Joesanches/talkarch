@@ -76,3 +76,21 @@ describe('ageLabel и membershipLine', () => {
     expect(membershipText('invite', ['Смирнова А. В.', 'Ершова Т. Н.', 'Смирнова А. В.'])).toBe('Приглашение в чат: Смирнова А. В., Ершова Т. Н.');
   });
 });
+
+describe('reactionSummaries', () => {
+  it('считает отметивших, порядок — как в наборе статусов, моя отметка снимаема', async () => {
+    const { reactionSummaries } = await import('./model.ts');
+    const r = (id: string, sender: string, target: string, key: string) => item(id, 'm.reaction', { 'm.relates_to': { rel_type: 'm.annotation', event_id: target, key } }, sender);
+    const items = [
+      r('$1', '@a:x', '$m', 'вопрос'),
+      r('$2', '@b:x', '$m', 'принято'),
+      r('$3', '@me:x', '$m', 'принято'),
+      r('$4', '@me:x', '$m', 'принято'), // повтор той же отметки не удваивает счёт
+      item('$5', 'm.reaction', {}, '@c:x'), // снятая (redacted) реакция без отношения
+    ];
+    expect(reactionSummaries(items, '@me:x').get('$m')).toEqual([
+      { key: 'принято', label: 'Принято', count: 2, mine: '$4' },
+      { key: 'вопрос', label: 'Вопрос', count: 1, mine: null },
+    ]);
+  });
+});

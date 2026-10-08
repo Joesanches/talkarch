@@ -207,3 +207,50 @@ const membershipTitles: Record<MembershipKind, string> = {
 
 /** Одна строка на подряд идущие однотипные изменения: «Приглашение в чат: Смирнова А. В., Ершова Т. Н.». */
 export const membershipText = (kind: MembershipKind, names: string[]) => `${membershipTitles[kind]}: ${[...new Set(names)].join(', ')}`;
+
+/** Реакции-статусы в порядке показа (docs/05-ux.md): однозначный смысл вместо эмодзи. */
+export const REACTIONS: ReadonlyArray<{ key: string; label: string }> = [
+  { key: 'принято', label: 'Принято' },
+  { key: 'согласен', label: 'Согласен' },
+  { key: 'видел', label: 'Видел' },
+  { key: 'вопрос', label: 'Вопрос' },
+  { key: 'срочно', label: 'Срочно' },
+];
+
+export interface ReactionSummary {
+  key: string;
+  label: string;
+  count: number;
+  /** ID моей реакции с этим ключом — чтобы снять её. */
+  mine: string | null;
+}
+
+/** Сводка реакций (m.reaction, m.annotation) по сообщениям: ключ → число отметивших и моя отметка. */
+export function reactionSummaries(items: TimelineItem[], me: string): Map<string, ReactionSummary[]> {
+  const byTarget = new Map<string, Map<string, { senders: Set<string>; mine: string | null }>>();
+  for (const e of items) {
+    if (e.type !== 'm.reaction') continue;
+    const rel = e.content['m.relates_to'] as { rel_type?: string; event_id?: string; key?: string } | undefined;
+    if (rel?.rel_type !== 'm.annotation' || !rel.event_id || !rel.key) continue;
+    const keys = byTarget.get(rel.event_id) ?? new Map();
+    const entry = keys.get(rel.key) ?? { senders: new Set<string>(), mine: null };
+    entry.senders.add(e.sender);
+    if (e.sender === me) entry.mine = e.eventId;
+    keys.set(rel.key, entry);
+    byTarget.set(rel.event_id, keys);
+  }
+  const order = (k: string) => {
+    const i = REACTIONS.findIndex((r) => r.key === k);
+    return i < 0 ? REACTIONS.length : i;
+  };
+  const out = new Map<string, ReactionSummary[]>();
+  for (const [target, keys] of byTarget) {
+    out.set(
+      target,
+      [...keys.entries()]
+        .sort(([a], [b]) => order(a) - order(b))
+        .map(([key, v]) => ({ key, label: REACTIONS.find((r) => r.key === key)?.label ?? key, count: v.senders.size, mine: v.mine })),
+    );
+  }
+  return out;
+}

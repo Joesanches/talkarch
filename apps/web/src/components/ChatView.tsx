@@ -8,6 +8,8 @@ import {
   formatDue,
   formatTime,
   membershipKind,
+  reactionSummaries,
+  REACTIONS,
   membershipText,
   type MembershipKind,
   parseCaseContext,
@@ -22,6 +24,7 @@ import {
   type TimelineItem,
 } from '../model.ts';
 import { activeCall, formatDuration } from '../call.ts';
+import { config } from '../config.ts';
 import { toItem } from '../matrix.ts';
 import { useAuthedMedia } from '../media.ts';
 import { RoomAvatar } from './ChatList.tsx';
@@ -37,7 +40,71 @@ export const openInNewTab: OpenLink = (link) => {
   if ('url' in link) window.open(link.url, '_blank', 'noopener,noreferrer');
 };
 
-function CaseBar({ ctx, onOpenLink }: { ctx: CaseContext; onOpenLink: OpenLink }) {
+interface PatientDetails {
+  display_name: string;
+  birth_date?: string;
+  mrn?: string;
+}
+
+/**
+ * «Показать данные пациента»: сервис контекста спрашивает систему-источник (она проверяет права и пишет журнал).
+ * Данные живут только в памяти этого компонента и скрываются через минуту.
+ */
+function PatientReveal({ client, roomId }: { client: MatrixClient; roomId: string }) {
+  const [patient, setPatient] = useState<PatientDetails | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!patient) return;
+    const t = setTimeout(() => setPatient(null), 60_000);
+    return () => clearTimeout(t);
+  }, [patient]);
+
+  async function reveal() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`${config.ccsUrl}/api/v1/cases/patient`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${client.getAccessToken()}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ roomId, reason: 'просмотр в чате случая' }),
+        cache: 'no-store',
+      });
+      if (res.status === 501) throw new Error('Для этой системы раскрытие недоступно — откройте карточку в ней');
+      if (res.status === 403) throw new Error('Нет доступа к данным пациента');
+      if (!res.ok) throw new Error('Система-источник недоступна');
+      setPatient(((await res.json()) as { patient: PatientDetails }).patient);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (patient) {
+    const born = patient.birth_date ? new Date(patient.birth_date).toLocaleDateString('ru-RU') : null;
+    return (
+      <span className="patient-revealed" aria-live="polite">
+        <b>{patient.display_name}</b>
+        {born && <span>, {born}</span>}
+        {patient.mrn && <span> · карта {patient.mrn}</span>}
+        <button className="link" onClick={() => setPatient(null)}>
+          Скрыть
+        </button>
+      </span>
+    );
+  }
+  return (
+    <>
+      <button className="link" onClick={() => void reveal()} disabled={busy} title="Запрос записывается в журнал системы-источника">
+        {busy ? 'Запрос…' : 'Показать'}
+      </button>
+      {error && <span className="reveal-error">{error}</span>}
+    </>
+  );
+}
+
+function CaseBar({ ctx, onOpenLink, client, roomId }: { ctx: CaseContext; onOpenLink: OpenLink; client: MatrixClient; roomId: string }) {
   const patient = [ctx.patient.masked, ctx.patient.sex ? sexLabel[ctx.patient.sex] : null, ctx.patient.age !== undefined ? ageLabel(ctx.patient.age) : null]
     .filter(Boolean)
     .join(', ');
@@ -51,7 +118,9 @@ function CaseBar({ ctx, onOpenLink }: { ctx: CaseContext; onOpenLink: OpenLink }
           <span>{ctx.title}</span>
         </div>
         <div className="casebar-meta">
-          <span title="Пациент (маска)">{patient}</span>
+          <span title="Пациент (маска)">
+            {patient} <PatientReveal key={roomId} client={client} roomId={roomId} />
+          </span>
           {ctx.stage && <span>Этап: {stageLabel(ctx.stage)}</span>}
           {ctx.due && <span>{formatDue(ctx.due)}</span>}
         </div>
@@ -138,6 +207,35 @@ function KeyImageCard({ client, msg, onOpenLink }: { client: MatrixClient; msg: 
       >
         Открыть во вьюере
       </button>
+    </div>
+  );
+}
+
+/** Кнопка «Отметить» у сообщения: пять реакций-статусов. */
+function ReactionPicker({ onPick }: { onPick: (key: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="reaction-picker">
+      <button className="reaction-toggle" aria-label="Отметить сообщение" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Icon name="check" size={16} />
+      </button>
+      {open && (
+        <div className="reaction-menu" role="menu" onMouseLeave={() => setOpen(false)}>
+          {REACTIONS.map((r) => (
+            <button
+              key={r.key}
+              role="menuitem"
+              className={`reaction ${r.key}`}
+              onClick={() => {
+                onPick(r.key);
+                setOpen(false);
+              }}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -233,6 +331,12 @@ export function ChatView({
   const events: MatrixEvent[] = room.getLiveTimeline().getEvents();
   const items = events.map(toItem);
   const requests = requestViews(items);
+  const reactions = reactionSummaries(items, me);
+  const react = (eventId: string, key: string) => {
+    const mine = reactions.get(eventId)?.find((r) => r.key === key)?.mine;
+    if (mine) void client.redactEvent(room.roomId, mine).catch(() => undefined);
+    else void client.sendEvent(room.roomId, 'm.reaction' as never, { 'm.relates_to': { rel_type: 'm.annotation', event_id: eventId, key } } as never).catch(() => undefined);
+  };
   const ctx = room.getType() === RoomType.Case ? parseCaseContext(room.currentState.getStateEvents(EventType.CaseContext, '')?.getContent()) : null;
   const roles = (room.currentState.getStateEvents(EventType.CaseRoles, '')?.getContent() as CaseRolesContent | undefined)?.members ?? {};
   const name = (userId: string) => room.getMember(userId)?.name ?? userId;
@@ -342,7 +446,17 @@ export function ChatView({
             <div className="text">{String(e.content.body ?? '')}</div>
           )}
           <span className="meta">{pending ? 'отправка…' : formatTime(e.ts)}</span>
+          {(reactions.get(e.eventId)?.length ?? 0) > 0 && (
+            <div className="reactions">
+              {reactions.get(e.eventId)!.map((r) => (
+                <button key={r.key} className={`reaction ${r.key}${r.mine ? ' mine' : ''}`} onClick={() => react(e.eventId, r.key)} aria-pressed={!!r.mine} title={r.mine ? 'Снять отметку' : 'Отметить'}>
+                  {r.label} <b>{r.count}</b>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
+        {!pending && joined && <ReactionPicker onPick={(key) => react(e.eventId, key)} />}
       </div>,
     );
   });
@@ -375,7 +489,7 @@ export function ChatView({
           </div>
         )}
       </header>
-      {ctx && <CaseBar ctx={ctx} onOpenLink={onOpenLink} />}
+      {ctx && <CaseBar ctx={ctx} onOpenLink={onOpenLink} client={client} roomId={room.roomId} />}
       {call && !inCall && joined && (
         <div className="call-banner" role="status">
           <span className="callbar-dot" />

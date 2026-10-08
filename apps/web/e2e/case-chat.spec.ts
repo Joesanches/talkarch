@@ -33,6 +33,23 @@ test('врач открывает чат случая по ссылке из Л�
     await expect(page.locator('.msg.out .meta').last()).not.toHaveText('отправка…');
   });
 
+  await test.step('реакция-статус «Согласен»: ставится и снимается', async () => {
+    const msg = page.locator('.msg.out').last();
+    await msg.hover();
+    await msg.getByRole('button', { name: 'Отметить сообщение' }).click();
+    await msg.getByRole('menuitem', { name: 'Согласен' }).click();
+    await expect(msg.locator('.reaction.mine')).toHaveText('Согласен 1');
+    await msg.locator('.reaction.mine').click();
+    await expect(msg.locator('.reactions')).toHaveCount(0);
+  });
+
+  await test.step('данные пациента — по запросу, с журналом в ЛИС, кнопка «Скрыть»', async () => {
+    await bar.getByRole('button', { name: 'Показать' }).click();
+    await expect(bar).toContainText('Нестерова Ольга Викторовна, 14.03.1972');
+    await bar.getByRole('button', { name: 'Скрыть' }).click();
+    await expect(bar).not.toContainText('Нестерова');
+  });
+
   await test.step('заявка ИГХ из формы: карточка проходит этапы до «Готово»', async () => {
     await page.getByRole('button', { name: '+ Заявка в ЛИС' }).click();
     const form = page.getByRole('form', { name: 'Новая заявка' });

@@ -55,7 +55,7 @@ cd deploy/stand && ./stand.sh init chat-test.example.ru admin@example.ru && ./st
 
 ```bash
 pnpm install
-pnpm test                               # модульные тесты (80)
+pnpm test                               # модульные тесты (81)
 cd infra && docker compose up -d && cd ..
 pnpm dev:users                          # пользователи стенда (пароль dev-only-password-1)
 pnpm test:it                            # интеграционные тесты на Synapse (12)
