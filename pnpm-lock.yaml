@@ -60,6 +60,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@konsilium/embed':
+        specifier: workspace:*
+        version: link:../../packages/embed
       '@konsilium/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -97,6 +100,8 @@ importers:
       vite:
         specifier: 7.3.7
         version: 7.3.7(@types/node@22.20.5)(tsx@4.23.15)(yaml@2.9.1)
+
+  packages/embed: {}
 
   packages/protocol:
     dependencies:

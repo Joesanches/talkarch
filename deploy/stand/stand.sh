@@ -26,7 +26,8 @@ usage() {
   status | logs [сервис] | down | destroy
 
 Переменные для init: TLS_MODE=internal — свой сертификат вместо Let's Encrypt;
-NODE_IP=<адрес> — адрес для медиа звонков, если автоопределение не подходит.
+NODE_IP=<адрес> — адрес для медиа звонков, если автоопределение не подходит;
+EMBED_ORIGINS="https://ris.example.ru …" — страницы РИС/ЛИС, которым можно встраивать чат.
 USAGE
 }
 
@@ -35,7 +36,7 @@ render() { # render <шаблон> <файл>
   content=$(<"$src")
   for var in DOMAIN DOMAIN_RE PG_PASSWORD REG_SECRET MACAROON_SECRET FORM_SECRET AS_TOKEN HS_TOKEN ALIAS_SECRET \
     LIVEKIT_KEY LIVEKIT_SECRET LIVEKIT_IP LIS_TOKEN LIS_TOKEN_SHA RIS_TOKEN RIS_TOKEN_SHA TEAM_TOKEN_SHA \
-    LIS_CALLBACK_TOKEN DEMO_PASSWORD; do
+    LIS_CALLBACK_TOKEN DEMO_PASSWORD EMBED_ORIGINS_JSON; do
     content=${content//"__${var}__"/"${!var}"}
   done
   printf '%s\n' "$content" >"$dst"
@@ -57,6 +58,7 @@ cmd_init() {
   ACME_EMAIL=${email:-${ACME_EMAIL:-}}
   TLS_MODE=${TLS_MODE:-acme}
   NODE_IP=${NODE_IP:-}
+  EMBED_ORIGINS=${EMBED_ORIGINS:-}
   PG_PASSWORD=${PG_PASSWORD:-$(rand 32)}
   REG_SECRET=${REG_SECRET:-$(rand 48)}
   MACAROON_SECRET=${MACAROON_SECRET:-$(rand 48)}
@@ -79,6 +81,8 @@ DOMAIN=$DOMAIN
 ACME_EMAIL=$ACME_EMAIL
 TLS_MODE=$TLS_MODE
 NODE_IP=$NODE_IP
+# Origin страниц РИС/ЛИС, которым можно встраивать чат (через пробел), например: https://ris.clinic.ru https://lis.clinic.ru
+EMBED_ORIGINS="$EMBED_ORIGINS"
 PG_PASSWORD=$PG_PASSWORD
 REG_SECRET=$REG_SECRET
 MACAROON_SECRET=$MACAROON_SECRET
@@ -98,6 +102,8 @@ BUILD_CA_FILE=${BUILD_CA_FILE:-}
 ENV
 
   DOMAIN_RE=${DOMAIN//./\\.}
+  EMBED_ORIGINS_JSON=''
+  for o in $EMBED_ORIGINS; do EMBED_ORIGINS_JSON+="${EMBED_ORIGINS_JSON:+, }\"$o\""; done
   LIS_TOKEN_SHA=$(sha "$LIS_TOKEN")
   RIS_TOKEN_SHA=$(sha "$RIS_TOKEN")
   TEAM_TOKEN_SHA=$(sha "$TEAM_TOKEN")
@@ -132,6 +138,7 @@ cmd_up() {
   echo
   echo "Стенд работает: https://$DOMAIN"
   echo "Демо-пользователи: ./stand.sh users. Ссылка на чат случая: https://$DOMAIN/c/lis/Г26-04512"
+  echo "Встраивание в РИС (демо): https://$DOMAIN/sandbox/ris"
 }
 
 run_users() { compose run --rm --no-deps host-mock node --import tsx apps/host-mock/src/users.ts "$@"; }

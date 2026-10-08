@@ -55,21 +55,22 @@ cd deploy/stand && ./stand.sh init chat-test.example.ru admin@example.ru && ./st
 
 ```bash
 pnpm install
-pnpm test                               # модульные тесты (77)
+pnpm test                               # модульные тесты (80)
 cd infra && docker compose up -d && cd ..
 pnpm dev:users                          # пользователи стенда (пароль dev-only-password-1)
 pnpm test:it                            # интеграционные тесты на Synapse (12)
-pnpm e2e                                # сквозные тесты в браузере, включая звонок двух участников (3)
+pnpm e2e                                # сквозные тесты в браузере: чат, звонок, встраивание в РИС (5)
 ```
 
 | Каталог | Что внутри |
 |---|---|
 | `apps/ccs` | Сервис клинического контекста: Matrix Application Service и API интеграции с РИС/ЛИС |
 | `apps/ccs/openapi` | Контракты OpenAPI: API интеграции и обратные вызовы в РИС/ЛИС |
-| `apps/host-mock` | Песочница РИС/ЛИС — эталон стороны РИС/ЛИС в интеграции; пользователи стенда |
+| `apps/host-mock` | Песочница РИС/ЛИС — эталон стороны РИС/ЛИС в интеграции; демо-РИС со встроенным чатом; пользователи стенда |
 | `apps/web` | Веб-клиент: список чатов с папками, чат случая с карточкой, заявки в ЛИС, уведомления, аудио- и видеозвонки |
 | `deploy/stand` | Тестовый стенд: развёртывание одной командой на машине с доменом |
 | `packages/protocol` | Типы и схемы событий «чата случая» и API интеграции |
+| `packages/embed` | SDK встраивания чата в РИС/ЛИС: `createChat()`, `<konsilium-chat>`, протокол `postMessage` |
 | `packages/tokens` | Дизайн-токены и проверка контраста |
 | `infra` | Окружение разработчика: PostgreSQL, Synapse, LiveKit |
 

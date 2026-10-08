@@ -44,7 +44,7 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
     if (!ready || !link || linkHandled.current) return;
     linkHandled.current = true;
     setBanner(`Открываем случай ${link.caseId}…`);
-    openCase(session, link.connector, link.caseId)
+    openCase(session, link)
       .then(async ({ roomId, membership }) => {
         if (membership !== 'join') await client.joinRoom(roomId);
         setSelected(roomId);

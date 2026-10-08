@@ -49,3 +49,8 @@ rc_login:
   address: { per_second: 0.5, burst_count: 30 }
   account: { per_second: 0.05, burst_count: 10 }
   failed_attempts: { per_second: 0.05, burst_count: 5 }
+
+# Контекст случая виден и в приглашении: клиент показывает карточку и счётчики до входа в чат.
+room_prejoin_state:
+  additional_event_types:
+    - ru.vendor.case.context

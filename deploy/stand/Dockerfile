@@ -30,7 +30,7 @@ COPY packages packages
 COPY apps apps
 
 FROM source AS web-build
-RUN pnpm --filter @konsilium/web exec vite build
+RUN pnpm --filter @konsilium/web run build:static
 
 FROM source AS app
 USER node

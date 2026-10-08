@@ -1,0 +1,15 @@
+{
+  "name": "@konsilium/embed",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SDK встраивания чата в РИС, ЛИС и ТМК: createChat() (panel, launcher, headless) и протокол postMessage",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./protocol": "./src/protocol.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  }
+}

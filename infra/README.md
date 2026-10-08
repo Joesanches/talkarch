@@ -21,7 +21,7 @@ pnpm dev:users
 pnpm dev:web
 ```
 
-Откройте чат случая так же, как его откроет кнопка в ЛИС: <http://localhost:5173/c/lis/Г26-04512>. Вход — `smirnova`, пароль `dev-only-password-1`. Цвет бренда можно примерить параметром `?accent=0E7C6B`.
+Откройте чат случая так же, как его откроет кнопка в ЛИС: <http://localhost:5173/c/lis/Г26-04512>. Встраивание в РИС — демо-страница песочницы <http://localhost:8090/demo/ris> (вход во фрейме как `orlov`). Вход — `smirnova`, пароль `dev-only-password-1`. Цвет бренда можно примерить параметром `?accent=0E7C6B`.
 
 Проверка:
 - `curl http://localhost:8008/_matrix/client/versions` — Synapse;

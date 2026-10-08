@@ -65,16 +65,19 @@ export function startClient(s: Session): MatrixClient {
   return client;
 }
 
-/** Перерисовка при любых изменениях в клиенте (не чаще одного раза за кадр). */
+/**
+ * Перерисовка при любых изменениях в клиенте — не чаще раза в 50 мс.
+ * Таймер, а не requestAnimationFrame: в невидимом фрейме (счётчики для РИС) браузер rAF не вызывает.
+ */
 export function useClientUpdates(client: MatrixClient): number {
   const [version, bump] = useReducer((v: number) => v + 1, 0);
   useEffect(() => {
-    let frame = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const schedule = () => {
-      if (!frame) frame = requestAnimationFrame(() => {
-        frame = 0;
+      if (!timer) timer = setTimeout(() => {
+        timer = null;
         bump();
-      });
+      }, 50);
     };
     const events = [ClientEvent.Sync, ClientEvent.Room, ClientEvent.DeleteRoom] as const;
     const roomEvents = [RoomEvent.Timeline, RoomEvent.Name, RoomEvent.MyMembership, RoomEvent.Receipt, RoomEvent.LocalEchoUpdated] as const;
@@ -82,7 +85,7 @@ export function useClientUpdates(client: MatrixClient): number {
     for (const e of roomEvents) client.on(e, schedule);
     client.on(RoomStateEvent.Events, schedule);
     return () => {
-      if (frame) cancelAnimationFrame(frame);
+      if (timer) clearTimeout(timer);
       for (const e of events) client.off(e, schedule);
       for (const e of roomEvents) client.off(e, schedule);
       client.off(RoomStateEvent.Events, schedule);
@@ -130,13 +133,22 @@ export class CcsError extends Error {
 }
 
 /** Открыть чат случая через сервис контекста: проверка прав в РИС/ЛИС, комната, приглашение. */
-export async function openCase(s: Session, connector: string, caseId: string): Promise<{ roomId: string; membership: string }> {
+export async function openCase(
+  s: Session,
+  ctx: { connector?: string; system?: string; caseId: string },
+): Promise<{ roomId: string; membership: string; connector: string; caseId: string }> {
   const res = await fetch(`${config.ccsUrl}/api/v1/cases/open`, {
     method: 'POST',
     headers: { authorization: `Bearer ${s.accessToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ connector, caseId }),
+    body: JSON.stringify(ctx.connector ? { connector: ctx.connector, caseId: ctx.caseId } : { system: ctx.system, caseId: ctx.caseId }),
   });
-  const json = (await res.json().catch(() => ({}))) as { roomId?: string; membership?: string; error?: string };
+  const json = (await res.json().catch(() => ({}))) as { roomId?: string; membership?: string; connector?: string; caseId?: string; error?: string };
   if (!res.ok) throw new CcsError(res.status, json.error ?? `Сервис контекста ответил ${res.status}`);
-  return { roomId: json.roomId!, membership: json.membership! };
+  return { roomId: json.roomId!, membership: json.membership!, connector: json.connector!, caseId: json.caseId! };
+}
+
+/** Сессия по токену, который передал хост (режим встраивания auth: token). */
+export async function sessionFromToken(accessToken: string): Promise<Session> {
+  const r = await createClient({ baseUrl: config.hsUrl, accessToken }).whoami();
+  return { baseUrl: config.hsUrl, userId: r.user_id, accessToken, deviceId: r.device_id ?? '' };
 }

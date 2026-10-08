@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react';
 import { Direction, EventStatus, type MatrixClient, type MatrixEvent, type Room } from 'matrix-js-sdk';
-import { EventType, MsgType, RoomType, type CaseContext, type CaseRolesContent } from '@konsilium/protocol';
+import { EventType, MsgType, RoomType, parseStructured, type CaseContext, type CaseRolesContent, type KeyImage } from '@konsilium/protocol';
+import type { LinkOpen } from '@konsilium/embed/protocol';
 import {
   ageLabel,
   formatDay,
@@ -22,6 +23,7 @@ import {
 } from '../model.ts';
 import { activeCall, formatDuration } from '../call.ts';
 import { toItem } from '../matrix.ts';
+import { useAuthedMedia } from '../media.ts';
 import { RoomAvatar } from './ChatList.tsx';
 import { RequestForm } from './RequestForm.tsx';
 import { Icon } from './Icon.tsx';
@@ -29,7 +31,13 @@ import { Icon } from './Icon.tsx';
 const sexLabel: Record<string, string> = { F: 'Ж', M: 'М' };
 
 /** Карточка случая над лентой: данные из РИС/ЛИС, ФИО скрыто. */
-function CaseBar({ ctx }: { ctx: CaseContext }) {
+/** Ссылки: в отдельном клиенте — новая вкладка; во встроенном — событие link.open, решает хост. */
+export type OpenLink = (link: LinkOpen) => void;
+export const openInNewTab: OpenLink = (link) => {
+  if ('url' in link) window.open(link.url, '_blank', 'noopener,noreferrer');
+};
+
+function CaseBar({ ctx, onOpenLink }: { ctx: CaseContext; onOpenLink: OpenLink }) {
   const patient = [ctx.patient.masked, ctx.patient.sex ? sexLabel[ctx.patient.sex] : null, ctx.patient.age !== undefined ? ageLabel(ctx.patient.age) : null]
     .filter(Boolean)
     .join(', ');
@@ -52,12 +60,30 @@ function CaseBar({ ctx }: { ctx: CaseContext }) {
         {ctx.status && ctx.status !== 'open' && <span className="chip closed">{ctx.status === 'closed' ? 'Закрыт' : 'Отменён'}</span>}
         {prio && <span className={`chip ${ctx.priority}`}>{prio}</span>}
         {ctx.links?.record && (
-          <a className="ghost" href={ctx.links.record} target="_blank" rel="noopener noreferrer">
+          <a
+            className="ghost"
+            href={ctx.links.record}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => {
+              e.preventDefault();
+              onOpenLink({ kind: 'record', url: ctx.links!.record! });
+            }}
+          >
             Карточка в {sys} <Icon name="external" size={14} />
           </a>
         )}
         {ctx.links?.viewer && (
-          <a className="ghost" href={ctx.links.viewer} target="_blank" rel="noopener noreferrer">
+          <a
+            className="ghost"
+            href={ctx.links.viewer}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => {
+              e.preventDefault();
+              onOpenLink({ kind: 'url', url: ctx.links!.viewer! });
+            }}
+          >
             Вьюер <Icon name="external" size={14} />
           </a>
         )}
@@ -86,6 +112,32 @@ function RequestCard({ view }: { view: RequestView }) {
         </ol>
       )}
       {view.note && <div className="request-note">{view.note}</div>}
+    </div>
+  );
+}
+
+/** Ключевой снимок из вьюера: миниатюра, параметры, «Открыть во вьюере» (тот же кадр и окно). */
+function KeyImageCard({ client, msg, onOpenLink }: { client: MatrixClient; msg: KeyImage; onOpenLink: OpenLink }) {
+  const k = msg[MsgType.KeyImage];
+  const src = useAuthedMedia(client, k.thumbnail);
+  const meta = [`Серия …${k.series_uid.slice(-6)}`, `кадр ${k.frame}`, k.presentation ? `Ш/У ${k.presentation.ww}/${k.presentation.wc}` : null].filter(Boolean).join(' · ');
+  return (
+    <div className="key-image" aria-label="Ключевой снимок">
+      <div className="key-image-thumb">{src ? <img src={src} alt={msg.body} /> : <span className="meta">Снимок</span>}</div>
+      <div className="key-image-caption">{msg.body}</div>
+      <div className="meta">{meta}</div>
+      <button
+        className="ghost"
+        onClick={() =>
+          onOpenLink(
+            k.link
+              ? { kind: 'url', url: k.link.url }
+              : { kind: 'dicom', studyUid: k.study_uid, seriesUid: k.series_uid, sopUid: k.sop_uid, frame: k.frame, ...(k.presentation ? { presentation: k.presentation } : {}) },
+          )
+        }
+      >
+        Открыть во вьюере
+      </button>
     </div>
   );
 }
@@ -149,7 +201,7 @@ function Composer({ client, room, requests }: { client: MatrixClient; room: Room
         </div>
       )}
     <div className="composer">
-      <textarea rows={1} placeholder="Сообщение" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} aria-label="Сообщение" />
+      <textarea id="composer-input" rows={1} placeholder="Сообщение" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} aria-label="Сообщение" />
       <button className="send" onClick={() => void send()} disabled={!text.trim()} aria-label="Отправить">
         <Icon name="send" />
       </button>
@@ -164,10 +216,15 @@ export function ChatView({
   onBack,
   inCall,
   onCall,
+  embedded = false,
+  onOpenLink = openInNewTab,
 }: {
   client: MatrixClient;
   room: Room;
   onBack: () => void;
+  /** Встроен в РИС/ЛИС: без кнопки «назад», ссылки отдаются хосту. */
+  embedded?: boolean;
+  onOpenLink?: OpenLink;
   /** Пользователь уже в звонке этой комнаты. */
   inCall: boolean;
   onCall: (video: boolean) => void;
@@ -266,6 +323,8 @@ export function ChatView({
     const role = roles[e.sender]?.role;
     const pending = events[i]?.status === EventStatus.SENDING || events[i]?.status === EventStatus.QUEUED;
     const request = e.content.msgtype === MsgType.Request ? requests.get(e.eventId) : undefined;
+    const structured = e.content.msgtype === MsgType.KeyImage ? parseStructured(e.content) : null;
+    const keyImage = structured?.msgtype === MsgType.KeyImage ? structured : null;
     rows.push(
       <div key={e.eventId} className={`msg ${mine ? 'out' : 'in'}${first ? ' first' : ''}`}>
         <div className="bubble">
@@ -275,7 +334,13 @@ export function ChatView({
               {role && <span className="role"> · {roleLabel(role)}</span>}
             </div>
           )}
-          {request ? <RequestCard view={request} /> : <div className="text">{String(e.content.body ?? '')}</div>}
+          {request ? (
+            <RequestCard view={request} />
+          ) : keyImage ? (
+            <KeyImageCard client={client} msg={keyImage} onOpenLink={onOpenLink} />
+          ) : (
+            <div className="text">{String(e.content.body ?? '')}</div>
+          )}
           <span className="meta">{pending ? 'отправка…' : formatTime(e.ts)}</span>
         </div>
       </div>,
@@ -286,9 +351,11 @@ export function ChatView({
   return (
     <>
       <header className="chat-header">
-        <button className="back" onClick={onBack} aria-label="К списку чатов">
-          ‹
-        </button>
+        {!embedded && (
+          <button className="back" onClick={onBack} aria-label="К списку чатов">
+            ‹
+          </button>
+        )}
         <RoomAvatar room={room} size="small" />
         <div>
           <div className="chat-title">{room.name}</div>
@@ -308,7 +375,7 @@ export function ChatView({
           </div>
         )}
       </header>
-      {ctx && <CaseBar ctx={ctx} />}
+      {ctx && <CaseBar ctx={ctx} onOpenLink={onOpenLink} />}
       {call && !inCall && joined && (
         <div className="call-banner" role="status">
           <span className="callbar-dot" />

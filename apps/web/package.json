@@ -6,13 +6,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.json && vite build",
+    "build": "tsc -p tsconfig.json && vite build && vite build -c vite.embed.config.ts",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "build:static": "vite build && vite build -c vite.embed.config.ts"
   },
   "dependencies": {
+    "@konsilium/embed": "workspace:*",
     "@konsilium/protocol": "workspace:*",
     "@konsilium/tokens": "workspace:*",
     "livekit-client": "2.22.3",

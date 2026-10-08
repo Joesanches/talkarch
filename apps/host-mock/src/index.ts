@@ -8,6 +8,7 @@ const env = process.env;
 const port = Number(env.HOST_MOCK_PORT ?? 8090);
 const mock = createHostMock({
   ccsUrl: env.CCS_URL ?? 'http://localhost:8080',
+  chatUrl: env.CHAT_WEB_URL ?? 'http://localhost:5173',
   stepMs: Number(env.STEP_MS ?? 3000),
   logger: true,
   connectors: [

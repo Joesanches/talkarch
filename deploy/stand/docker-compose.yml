@@ -100,6 +100,7 @@ services:
     environment:
       DOMAIN: ${DOMAIN}
       TLS_MODE: ${TLS_MODE:-acme}
+      EMBED_ORIGINS: ${EMBED_ORIGINS:-}
     volumes:
       - ./generated/config.json:/srv/config.json:ro
       - ./generated/caddy-global.caddy:/etc/caddy/global.caddy:ro

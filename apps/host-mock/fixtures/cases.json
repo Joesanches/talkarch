@@ -9,22 +9,57 @@
             "version": 1,
             "status": "open",
             "title": "Биопсия молочной железы, слева",
-            "patient": { "ref": "pseudo:7f3c9a1e", "masked": "Н*** О. В.", "age": 54, "sex": "F" },
+            "patient": {
+              "ref": "pseudo:7f3c9a1e",
+              "masked": "Н*** О. В.",
+              "age": 54,
+              "sex": "F"
+            },
             "order_id": "Н-2611",
             "stage": "ihc",
             "priority": "urgent",
             "due": "2026-10-09T18:00:00+03:00",
-            "links": { "record": "https://lis.clinic.local/cases/G26-04512", "viewer": "https://wsi.clinic.local/case/G26-04512" },
+            "links": {
+              "record": "https://lis.clinic.local/cases/G26-04512",
+              "viewer": "https://wsi.clinic.local/case/G26-04512"
+            },
             "participants": [
-              { "user": { "login": "smirnova", "display_name": "Смирнова А. В." }, "role": "pathologist" },
-              { "user": { "login": "ershova", "display_name": "Ершова Т. Н." }, "role": "lab_tech" },
-              { "user": { "login": "kolesnikov", "display_name": "Колесников Д. А." }, "role": "attending" }
+              {
+                "user": {
+                  "login": "smirnova",
+                  "display_name": "Смирнова А. В."
+                },
+                "role": "pathologist"
+              },
+              {
+                "user": {
+                  "login": "ershova",
+                  "display_name": "Ершова Т. Н."
+                },
+                "role": "lab_tech"
+              },
+              {
+                "user": {
+                  "login": "kolesnikov",
+                  "display_name": "Колесников Д. А."
+                },
+                "role": "attending"
+              }
             ],
             "updated_at": "2026-10-07T09:12:00+03:00"
           },
           "host_only": {
-            "access": [{ "login": "gusev", "role": "head" }],
-            "patient": { "display_name": "Нестерова Ольга Викторовна", "birth_date": "1972-03-14", "mrn": "МК-0412" }
+            "access": [
+              {
+                "login": "gusev",
+                "role": "head"
+              }
+            ],
+            "patient": {
+              "display_name": "Нестерова Ольга Викторовна",
+              "birth_date": "1972-03-14",
+              "mrn": "МК-0412"
+            }
           }
         },
         {
@@ -34,16 +69,31 @@
             "version": 1,
             "status": "open",
             "title": "Операционный материал, толстая кишка",
-            "patient": { "ref": "pseudo:91d0e25b", "masked": "Л*** И. С.", "age": 61, "sex": "M" },
+            "patient": {
+              "ref": "pseudo:91d0e25b",
+              "masked": "Л*** И. С.",
+              "age": 61,
+              "sex": "M"
+            },
             "order_id": "Н-2640",
             "stage": "grossing",
             "priority": "routine",
-            "participants": [{ "user": { "login": "smirnova" }, "role": "pathologist" }],
+            "participants": [
+              {
+                "user": {
+                  "login": "smirnova"
+                },
+                "role": "pathologist"
+              }
+            ],
             "updated_at": "2026-10-07T10:40:00+03:00"
           },
           "host_only": {
             "access": [],
-            "patient": { "display_name": "Ларионов Игорь Сергеевич", "birth_date": "1965-11-02" }
+            "patient": {
+              "display_name": "Ларионов Игорь Сергеевич",
+              "birth_date": "1965-11-02"
+            }
           }
         }
       ]
@@ -56,18 +106,173 @@
             "version": 1,
             "status": "open",
             "title": "КТ-ангиопульмонография",
-            "patient": { "ref": "pseudo:2b8d0c44", "masked": "С*** В. П.", "age": 67, "sex": "M" },
+            "patient": {
+              "ref": "pseudo:2b8d0c44",
+              "masked": "С*** В. П.",
+              "age": 67,
+              "sex": "M"
+            },
             "accession_number": "A26-118734",
             "study_instance_uid": "1.2.643.5.1.13.13.12.2.77.8252.118734",
             "stage": "reporting",
             "priority": "cito",
             "participants": [
-              { "user": { "login": "orlov", "display_name": "Орлов К. М." }, "role": "radiologist" },
-              { "user": { "login": "safonova", "display_name": "Сафонова Е. И." }, "role": "radiographer" },
-              { "user": { "login": "melnikova", "display_name": "Мельникова Н. А." }, "role": "on_duty" }
+              {
+                "user": {
+                  "login": "orlov",
+                  "display_name": "Орлов К. М."
+                },
+                "role": "radiologist"
+              },
+              {
+                "user": {
+                  "login": "safonova",
+                  "display_name": "Сафонова Е. И."
+                },
+                "role": "radiographer"
+              },
+              {
+                "user": {
+                  "login": "melnikova",
+                  "display_name": "Мельникова Н. А."
+                },
+                "role": "on_duty"
+              }
             ],
-            "access": [{ "login": "belova", "display_name": "Белова Л. Р." }],
+            "access": [
+              {
+                "login": "belova",
+                "display_name": "Белова Л. Р."
+              }
+            ],
             "updated_at": "2026-10-07T08:47:00+03:00"
+          },
+          "host_only": {
+            "access": [],
+            "patient": {
+              "display_name": "Соколов Виктор Павлович",
+              "birth_date": "1959-04-21"
+            }
+          }
+        },
+        {
+          "snapshot": {
+            "case_id": "A26-118735",
+            "version": 1,
+            "status": "open",
+            "title": "МРТ головного мозга с контрастом",
+            "patient": {
+              "ref": "pseudo:4e1a7c90",
+              "masked": "К*** Д. И.",
+              "age": 45,
+              "sex": "M"
+            },
+            "accession_number": "A26-118735",
+            "study_instance_uid": "1.2.643.5.1.13.13.12.2.77.8252.118735",
+            "stage": "reporting",
+            "priority": "routine",
+            "participants": [
+              {
+                "user": {
+                  "login": "orlov"
+                },
+                "role": "radiologist"
+              },
+              {
+                "user": {
+                  "login": "safonova"
+                },
+                "role": "radiographer"
+              }
+            ],
+            "updated_at": "2026-10-07T09:05:00+03:00"
+          },
+          "host_only": {
+            "access": [],
+            "patient": {
+              "display_name": "Кузнецов Дмитрий Игоревич",
+              "birth_date": "1981-09-02"
+            }
+          }
+        },
+        {
+          "snapshot": {
+            "case_id": "A26-118736",
+            "version": 1,
+            "status": "open",
+            "title": "РГ органов грудной клетки",
+            "patient": {
+              "ref": "pseudo:b7d21e05",
+              "masked": "Б*** А. С.",
+              "age": 72,
+              "sex": "F"
+            },
+            "accession_number": "A26-118736",
+            "study_instance_uid": "1.2.643.5.1.13.13.12.2.77.8252.118736",
+            "stage": "reporting",
+            "priority": "urgent",
+            "participants": [
+              {
+                "user": {
+                  "login": "orlov"
+                },
+                "role": "radiologist"
+              },
+              {
+                "user": {
+                  "login": "melnikova"
+                },
+                "role": "on_duty"
+              }
+            ],
+            "updated_at": "2026-10-07T09:20:00+03:00"
+          },
+          "host_only": {
+            "access": [],
+            "patient": {
+              "display_name": "Борисова Анна Сергеевна",
+              "birth_date": "1954-01-17"
+            }
+          }
+        },
+        {
+          "snapshot": {
+            "case_id": "A26-118737",
+            "version": 1,
+            "status": "open",
+            "title": "КТ органов брюшной полости с контрастом",
+            "patient": {
+              "ref": "pseudo:0c93f4aa",
+              "masked": "Г*** Е. В.",
+              "age": 58,
+              "sex": "M"
+            },
+            "accession_number": "A26-118737",
+            "study_instance_uid": "1.2.643.5.1.13.13.12.2.77.8252.118737",
+            "stage": "reporting",
+            "priority": "routine",
+            "participants": [
+              {
+                "user": {
+                  "login": "orlov"
+                },
+                "role": "radiologist"
+              },
+              {
+                "user": {
+                  "login": "safonova"
+                },
+                "role": "radiographer"
+              }
+            ],
+            "updated_at": "2026-10-07T09:41:00+03:00"
+          },
+          "host_only": {
+            "access": [],
+            "patient": {
+              "display_name": "Григорьев Евгений Викторович",
+              "birth_date": "1968-06-30"
+            }
           }
         }
       ]

@@ -13,6 +13,8 @@
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "no-referrer"
 		Permissions-Policy "camera=(self), microphone=(self), display-capture=(self)"
+		# Встраивать чат во фрейм можно только своим страницам и РИС/ЛИС из EMBED_ORIGINS.
+		Content-Security-Policy "frame-ancestors 'self' {$EMBED_ORIGINS}"
 		-Server
 	}
 
@@ -42,6 +44,19 @@
 	# Сигнализация звонков (WebSocket). Медиа идёт напрямую на LiveKit: UDP 7882, TCP 7881, TURN UDP 3478.
 	handle_path /livekit/* {
 		reverse_proxy livekit:7880
+	}
+
+	# SDK встраивания для страниц РИС/ЛИС на других доменах.
+	handle /embed/v1/* {
+		header Access-Control-Allow-Origin *
+		root * /srv
+		file_server
+	}
+
+	# Демо-страница РИС из песочницы (встраивание чата). Обратные вызовы песочницы наружу не публикуются.
+	handle /sandbox/* {
+		uri replace /sandbox/ /demo/ 1
+		reverse_proxy host-mock:8090
 	}
 
 	# Веб-клиент; адреса серверов — в /config.json.

@@ -12,6 +12,7 @@ import { resolve } from 'node:path';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { CaseRole, type RequestStep } from '@konsilium/protocol';
+import { renderRisDemo } from './demo.ts';
 import {
   AccessCheckRequest,
   CaseSnapshot,
@@ -59,6 +60,8 @@ export interface HostMockOptions {
   /** Пауза между шагами заявки (мс). 0 — шаги не продвигаются сами. */
   stepMs?: number;
   fixture?: unknown;
+  /** Адрес веб-клиента «Консилиума» для демо-страницы РИС (SDK встраивания). */
+  chatUrl?: string;
   logger?: boolean;
 }
 
@@ -192,6 +195,13 @@ export function createHostMock(opts: HostMockOptions) {
   }
 
   app.get('/healthz', async () => ({ ok: true }));
+
+  // Демо-страница РИС со встроенным чатом (не обратный вызов: без токена, только вымышленные данные).
+  app.get('/demo/ris', async (_req, reply) => {
+    const studies = (cases.get('ris') ?? []).map((c) => ({ snapshot: c.snapshot, patientName: c.host_only.patient?.display_name ?? c.snapshot.patient.masked }));
+    reply.type('text/html; charset=utf-8').header('cache-control', 'no-store');
+    return renderRisDemo((opts.chatUrl ?? 'http://localhost:5173').replace(/\/$/, ''), studies);
+  });
 
   app.get('/:connector/cases/:caseId', async (req, reply) => {
     const c = authorize(req, reply);

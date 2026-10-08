@@ -960,3 +960,55 @@ button:disabled {
   padding: 8px 14px;
   font-size: 14px;
 }
+
+/* ── Ключевой снимок ─────────────────────────────────────────────────── */
+.key-image {
+  display: grid;
+  gap: 6px;
+  width: min(320px, 100%);
+  padding: 2px 0;
+}
+.key-image-thumb {
+  aspect-ratio: 4 / 3;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #000;
+  display: grid;
+  place-items: center;
+}
+.key-image-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.key-image-caption {
+  font-weight: 500;
+}
+.key-image .ghost {
+  justify-self: start;
+}
+
+/* ── Встроенный режим (/embed) ──────────────────────────────────────── */
+.embed {
+  height: 100%;
+  display: flex;
+}
+.embed .chat {
+  flex: 1;
+  height: 100%;
+}
+.embed .login {
+  padding: 8px;
+}
+.embed .login-card {
+  padding: 18px;
+  box-shadow: none;
+}
+.embed-state {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  text-align: center;
+  color: var(--color-neutral-text-meta);
+}

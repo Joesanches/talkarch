@@ -1,1 +1,1 @@
-{ "hsUrl": "https://__DOMAIN__", "ccsUrl": "https://__DOMAIN__" }
+{ "hsUrl": "https://__DOMAIN__", "ccsUrl": "https://__DOMAIN__", "embedOrigins": [__EMBED_ORIGINS_JSON__] }
