@@ -28,6 +28,7 @@ usage() {
 Переменные для init: TLS_MODE=internal — свой сертификат вместо Let's Encrypt;
 NODE_IP=<адрес> — адрес для медиа звонков, если автоопределение не подходит;
 EMBED_ORIGINS="https://ris.example.ru …" — страницы РИС/ЛИС, которым можно встраивать чат;
+SSO=off — без единого входа через Keycloak (по умолчанию он есть: +1 ГБ ОЗУ);
 AI=cpu — ИИ-«Секретарь» (стенограмма звонка и черновик протокола) на процессоре: +8 ГБ ОЗУ, +10 ГБ диска;
 LLM_URL=… LLM_MODEL=… — внешний OpenAI-совместимый ИИ-шлюз вместо LLM на стенде (с AI=cpu).
 USAGE
@@ -38,7 +39,7 @@ render() { # render <шаблон> <файл>
   content=$(<"$src")
   for var in DOMAIN DOMAIN_RE PG_PASSWORD REG_SECRET MACAROON_SECRET FORM_SECRET AS_TOKEN HS_TOKEN ALIAS_SECRET \
     LIVEKIT_KEY LIVEKIT_SECRET LIVEKIT_IP LIS_TOKEN LIS_TOKEN_SHA RIS_TOKEN RIS_TOKEN_SHA TEAM_TOKEN_SHA \
-    LIS_CALLBACK_TOKEN DEMO_PASSWORD EMBED_ORIGINS_JSON AI_ENV; do
+    LIS_CALLBACK_TOKEN DEMO_PASSWORD EMBED_ORIGINS_JSON AI_ENV OIDC_SECRET OIDC_YAML; do
     content=${content//"__${var}__"/"${!var}"}
   done
   printf '%s\n' "$content" >"$dst"
@@ -49,7 +50,7 @@ cmd_init() {
   [[ -n $domain ]] || die "укажите домен: ./stand.sh init chat-test.example.ru admin@example.ru"
   # Заданное в командной строке (NODE_IP=… AI=cpu ./stand.sh init …) важнее сохранённого в .env.
   local overrides=() v
-  for v in TLS_MODE NODE_IP EMBED_ORIGINS AI LLM_URL LLM_MODEL BUILD_CA_FILE; do
+  for v in TLS_MODE NODE_IP EMBED_ORIGINS AI SSO LLM_URL LLM_MODEL BUILD_CA_FILE; do
     [[ -n ${!v+x} ]] && overrides+=("$v=${!v}")
   done
   if [[ -f $ENV_FILE ]]; then
@@ -86,7 +87,13 @@ cmd_init() {
   SECRETARY_TOKEN=${SECRETARY_TOKEN:-$(rand 48)}
   LLM_URL=${LLM_URL:-}
   LLM_MODEL=${LLM_MODEL:-}
-  if [[ $AI == cpu ]]; then COMPOSE_PROFILES=ai; else COMPOSE_PROFILES=; fi
+  SSO=${SSO:-keycloak}
+  [[ $SSO == keycloak || $SSO == off ]] || die "SSO=keycloak или SSO=off"
+  OIDC_SECRET=${OIDC_SECRET:-$(rand 48)}
+  KC_ADMIN_PASSWORD=${KC_ADMIN_PASSWORD:-$(rand 20)}
+  COMPOSE_PROFILES=
+  if [[ $SSO == keycloak ]]; then COMPOSE_PROFILES=sso; fi
+  if [[ $AI == cpu ]]; then COMPOSE_PROFILES=${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}ai; fi
   # Сертификат прокси нужен и LLM-сервису: он скачивает модель при первом запуске.
   if [[ $AI == cpu && -n ${BUILD_CA_FILE:-} ]]; then LLM_SSL_CERT_FILE=/etc/konsilium/ca.crt; else LLM_SSL_CERT_FILE=; fi
 
@@ -115,6 +122,10 @@ LIS_CALLBACK_TOKEN=$LIS_CALLBACK_TOKEN
 DEMO_PASSWORD=$DEMO_PASSWORD
 # Корневой сертификат корпоративного прокси для сборки образов (если сеть подменяет TLS).
 BUILD_CA_FILE=${BUILD_CA_FILE:-}
+# Единый вход: keycloak | off. Консоль Keycloak — https://$DOMAIN/auth/admin (admin / KC_ADMIN_PASSWORD).
+SSO=$SSO
+OIDC_SECRET=$OIDC_SECRET
+KC_ADMIN_PASSWORD=$KC_ADMIN_PASSWORD
 # ИИ-«Секретарь»: off | cpu. Внешний ИИ-шлюз — LLM_URL и LLM_MODEL (пусто — LLM на стенде).
 AI=$AI
 COMPOSE_PROFILES=$COMPOSE_PROFILES
@@ -143,6 +154,35 @@ LLM_MODEL=${LLM_MODEL:-ai/qwen3:1.7b-q4_K_M}"
   else
     AI_ENV='# ИИ-«Секретарь» выключен (AI=off)'
   fi
+  if [[ $SSO == keycloak ]]; then
+    # Браузер идёт на https://домен/auth, Synapse — напрямую в Keycloak внутри сети стенда (поэтому без проверки https
+    # у внутренних адресов; издатель токенов проверяется). sso.client_whitelist — без страницы «Продолжить в …».
+    OIDC_YAML="# Единый вход через Keycloak стенда (SSO=keycloak).
+oidc_providers:
+  - idp_id: keycloak
+    idp_name: \"учётную запись организации\"
+    issuer: \"https://$DOMAIN/auth/realms/konsilium\"
+    discover: false
+    skip_verification: true
+    authorization_endpoint: \"https://$DOMAIN/auth/realms/konsilium/protocol/openid-connect/auth\"
+    token_endpoint: \"http://keycloak:8080/auth/realms/konsilium/protocol/openid-connect/token\"
+    userinfo_endpoint: \"http://keycloak:8080/auth/realms/konsilium/protocol/openid-connect/userinfo\"
+    jwks_uri: \"http://keycloak:8080/auth/realms/konsilium/protocol/openid-connect/certs\"
+    client_id: synapse
+    client_secret: \"$OIDC_SECRET\"
+    client_auth_method: client_secret_post
+    scopes: [\"openid\", \"profile\"]
+    allow_existing_users: true
+    user_mapping_provider:
+      config:
+        localpart_template: \"{{ user.preferred_username }}\"
+        display_name_template: \"{{ user.family_name }} {{ user.given_name }}\"
+sso:
+  client_whitelist:
+    - \"https://$DOMAIN/\""
+  else
+    OIDC_YAML='# Единый вход выключен (SSO=off)'
+  fi
   if [[ -n $NODE_IP ]]; then
     LIVEKIT_IP=$'  node_ip: '"$NODE_IP"$'\n  use_external_ip: false'
   else
@@ -155,13 +195,14 @@ LLM_MODEL=${LLM_MODEL:-ai/qwen3:1.7b-q4_K_M}"
   render log.yaml synapse/log.yaml
   render livekit.yaml livekit.yaml
   render connectors.json connectors.json
+  render realm-konsilium.json realm-konsilium.json
   render ccs.env ccs.env
   render host-mock.env host-mock.env
   umask 022
   render config.json config.json
   if [[ -n $ACME_EMAIL ]]; then echo "email $ACME_EMAIL" >"$GEN/caddy-global.caddy"; else echo "# email для ACME не задан" >"$GEN/caddy-global.caddy"; fi
   # Synapse в контейнере читает конфигурацию от своего пользователя.
-  chmod 644 "$GEN"/synapse/* "$GEN"/livekit.yaml "$GEN"/connectors.json "$GEN"/config.json "$GEN"/caddy-global.caddy
+  chmod 644 "$GEN"/synapse/* "$GEN"/livekit.yaml "$GEN"/connectors.json "$GEN"/config.json "$GEN"/caddy-global.caddy "$GEN"/realm-konsilium.json
   echo "Конфигурация для https://$DOMAIN готова (секреты — в deploy/stand/$ENV_FILE). Дальше: ./stand.sh up"
 }
 
@@ -175,6 +216,7 @@ cmd_up() {
   echo "Стенд работает: https://$DOMAIN"
   echo "Демо-пользователи: ./stand.sh users. Ссылка на чат случая: https://$DOMAIN/c/lis/Г26-04512"
   echo "Встраивание в РИС (демо): https://$DOMAIN/sandbox/ris"
+  if [[ ${SSO:-off} == keycloak ]]; then echo "Единый вход: кнопка «Войти через учётную запись организации» (Keycloak — https://$DOMAIN/auth)."; fi
   if [[ ${AI:-off} == cpu ]]; then echo "ИИ-«Секретарь» включён: кнопка «Стенограмма» в звонке чата случая."; fi
 }
 
@@ -194,6 +236,23 @@ cmd_users() {
 TXT
 }
 
+# Учётная запись тестировщика: в Synapse и, если включён единый вход, в Keycloak — с одним паролем.
+cmd_add_user() {
+  local login=$1 name=${2:-$1} password
+  password=$(rand 14)
+  compose run --rm --no-deps -e NEW_USER_PASSWORD="$password" host-mock node --import tsx apps/host-mock/src/users.ts add "$login" "$name" >/dev/null
+  if [[ ${SSO:-off} == keycloak ]]; then
+    local kc=(compose exec -T keycloak /opt/keycloak/bin/kcadm.sh) cfg=(--config /tmp/kcadm.config)
+    "${kc[@]}" config credentials --server http://localhost:8080/auth --realm master --user admin --password "$KC_ADMIN_PASSWORD" "${cfg[@]}" >/dev/null 2>&1
+    local last=${name%% *} first=${name#* }
+    [[ $first == "$name" ]] && first=''
+    "${kc[@]}" create users -r konsilium -s "username=$login" -s enabled=true -s emailVerified=true -s "email=$login@stand.invalid" \
+      -s "lastName=$last" -s "firstName=$first" "${cfg[@]}" >/dev/null 2>&1 || echo "В Keycloak пользователь $login уже есть — обновляю пароль"
+    "${kc[@]}" set-password -r konsilium --username "$login" --new-password "$password" "${cfg[@]}" >/dev/null
+  fi
+  echo "Пользователь $login создан. Логин: $login, пароль: $password"
+}
+
 cmd_tokens() {
   need_init
   cat <<TXT
@@ -209,7 +268,7 @@ case ${1:-help} in
   init) shift; cmd_init "$@" ;;
   up) cmd_up ;;
   users) cmd_users ;;
-  add-user) need_init; shift; [[ $# -ge 1 ]] || die 'укажите логин и имя: ./stand.sh add-user ivanov "Иванов И. И."'; run_users add "$@" ;;
+  add-user) need_init; shift; [[ $# -ge 1 ]] || die 'укажите логин и имя: ./stand.sh add-user ivanov "Иванов И. И."'; cmd_add_user "$@" ;;
   tokens) cmd_tokens ;;
   ca) need_init; compose exec -T web cat /data/caddy/pki/authorities/local/root.crt ;;
   status) need_init; compose ps ;;

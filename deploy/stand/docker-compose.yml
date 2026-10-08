@@ -118,6 +118,48 @@ services:
     depends_on:
       ccs: { condition: service_healthy }
 
+  # ── Единый вход (SSO=keycloak → профиль sso) ──────────────────────────
+  # База keycloak в том же PostgreSQL: создаётся один раз.
+  keycloak-db:
+    profiles: [sso]
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: ${PG_PASSWORD}
+    entrypoint: ["sh", "-c", "psql -h postgres -U synapse -d synapse -tAc \"select 1 from pg_database where datname='keycloak'\" | grep -q 1 || psql -h postgres -U synapse -d synapse -c 'create database keycloak'"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # Keycloak (Apache-2.0) за Caddy по адресу https://<домен>/auth. Realm konsilium с демо-пользователями импортируется
+  # при первом запуске. В продукте вместо него — Keycloak организации с федерацией в AD/LDAP.
+  keycloak:
+    profiles: [sso]
+    image: keycloak/keycloak:26.4@sha256:9409c59bdfb65dbffa20b11e6f18b8abb9281d480c7ca402f51ed3d5977e6007
+    restart: unless-stopped
+    command: ["start", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: synapse
+      KC_DB_PASSWORD: ${PG_PASSWORD}
+      KC_HOSTNAME: https://${DOMAIN}/auth
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      # Synapse обращается к Keycloak напрямую, внутри сети стенда; издатель токенов — публичный адрес.
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:-}
+    volumes:
+      - ./generated/realm-konsilium.json:/opt/keycloak/data/import/realm-konsilium.json:ro
+    depends_on:
+      keycloak-db: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /auth/health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 90
+
   # ── ИИ-«Секретарь» (AI=cpu → COMPOSE_PROFILES=ai) ──────────────────────
   # Распознавание русской речи: vosk-server с моделью kaldi-ru (Apache-2.0). ~6 ГБ памяти.
   vosk:

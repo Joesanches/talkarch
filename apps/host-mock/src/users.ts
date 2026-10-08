@@ -79,7 +79,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (command === 'add') {
     // Учётная запись для тестировщика: pnpm --filter @konsilium/host-mock users add ivanov "Иванов И. И."
     if (!login || !/^[a-z0-9._=-]+$/.test(login)) throw new Error('Укажите логин: латиница, цифры, «.», «_», «-»');
-    const password = randomBytes(9).toString('base64url');
+    // Пароль может задать вызывающий (stand.sh заводит тот же пароль и в Keycloak); иначе — случайный.
+    const password = process.env.NEW_USER_PASSWORD || randomBytes(9).toString('base64url');
     await ensureDevUsers(hs, secret, { [login]: name.join(' ') || login }, password);
     console.log(`Пользователь ${login} создан. Пароль: ${password}`);
   } else {

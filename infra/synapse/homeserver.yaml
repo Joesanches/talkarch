@@ -62,3 +62,33 @@ room_prejoin_state:
     - ru.vendor.case.context
     # Статусы критических находок: приглашённый эскалацией сразу видит в списке, что его ждёт находка.
     - ru.vendor.critical.status
+
+# Единый вход через Keycloak (OIDC). Логин в Keycloak = локальная часть Matrix ID — как в подключениях РИС/ЛИС;
+# существующие учётные записи (созданные pnpm dev:users) связываются автоматически.
+# Браузер ходит на localhost:8180, Synapse — напрямую в контейнер keycloak, поэтому адреса заданы явно.
+oidc_providers:
+  - idp_id: keycloak
+    idp_name: "учётную запись организации"
+    issuer: "http://localhost:8180/realms/konsilium"
+    discover: false
+    # Только для разработки: адреса Keycloak по http. На стенде и в продукте — https и проверки включены.
+    skip_verification: true
+    authorization_endpoint: "http://localhost:8180/realms/konsilium/protocol/openid-connect/auth"
+    token_endpoint: "http://keycloak:8080/realms/konsilium/protocol/openid-connect/token"
+    userinfo_endpoint: "http://keycloak:8080/realms/konsilium/protocol/openid-connect/userinfo"
+    jwks_uri: "http://keycloak:8080/realms/konsilium/protocol/openid-connect/certs"
+    client_id: synapse
+    client_secret: "dev-only-oidc-client-secret-0123456789"
+    client_auth_method: client_secret_post
+    scopes: ["openid", "profile"]
+    allow_existing_users: true
+    user_mapping_provider:
+      config:
+        localpart_template: "{{ user.preferred_username }}"
+        display_name_template: "{{ user.family_name }} {{ user.given_name }}"
+
+# Веб-клиент разработки — без промежуточной страницы «Продолжить в …» после входа.
+sso:
+  client_whitelist:
+    - "http://localhost:5173/"
+

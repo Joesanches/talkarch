@@ -1,0 +1,187 @@
+{
+  "realm": "konsilium",
+  "displayName": "Консилиум — разработка",
+  "enabled": true,
+  "internationalizationEnabled": true,
+  "supportedLocales": [
+    "ru"
+  ],
+  "defaultLocale": "ru",
+  "sslRequired": "none",
+  "loginWithEmailAllowed": false,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "bruteForceProtected": true,
+  "clients": [
+    {
+      "clientId": "synapse",
+      "name": "Консилиум (Synapse)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "dev-only-oidc-client-secret-0123456789",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8008/_synapse/client/oidc/callback"
+      ],
+      "webOrigins": [],
+      "attributes": {
+        "post.logout.redirect.uris": "http://localhost:5173/*"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "smirnova",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "smirnova@clinic.test",
+      "firstName": "А. В.",
+      "lastName": "Смирнова",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev-only-password-1",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "ershova",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "ershova@clinic.test",
+      "firstName": "Т. Н.",
+      "lastName": "Ершова",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev-only-password-1",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "kolesnikov",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "kolesnikov@clinic.test",
+      "firstName": "Д. А.",
+      "lastName": "Колесников",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev-only-password-1",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "gusev",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "gusev@clinic.test",
+      "firstName": "П. Р.",
+      "lastName": "Гусев",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev-only-password-1",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "petrov",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "petrov@clinic.test",
+      "firstName": "С. В.",
+      "lastName": "Петров",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev-only-password-1",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "orlov",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "orlov@clinic.test",
+      "firstName": "К. М.",
+      "lastName": "Орлов",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev-only-password-1",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "safonova",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "safonova@clinic.test",
+      "firstName": "Е. И.",
+      "lastName": "Сафонова",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev-only-password-1",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "melnikova",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "melnikova@clinic.test",
+      "firstName": "Н. А.",
+      "lastName": "Мельникова",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev-only-password-1",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "belova",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "belova@clinic.test",
+      "firstName": "Л. Р.",
+      "lastName": "Белова",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev-only-password-1",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "outsider",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "outsider@clinic.test",
+      "firstName": "пользователь",
+      "lastName": "Посторонний",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev-only-password-1",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

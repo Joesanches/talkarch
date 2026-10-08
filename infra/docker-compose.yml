@@ -1,4 +1,4 @@
-# Окружение разработчика PoC: PostgreSQL + Synapse + LiveKit.
+# Окружение разработчика PoC: PostgreSQL + Synapse + LiveKit + Keycloak (единый вход).
 # Сервис контекста (apps/ccs) запускается на хосте: pnpm dev:ccs — Synapse ходит к нему через host.docker.internal.
 # Профиль ai — ИИ-«Секретарь» на процессоре: распознавание речи (Vosk), LLM (llama.cpp) и агент стенограммы:
 #   docker compose --profile ai up -d   (нужно ~10 ГБ памяти и ~9 ГБ на диске)
@@ -53,6 +53,30 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8008/health"]
       interval: 2s
+      timeout: 3s
+      retries: 60
+
+  # Единый вход (OIDC): realm konsilium с теми же вымышленными пользователями, что в песочнице, пароль dev-only-password-1.
+  # Консоль администратора — http://localhost:8180/admin (admin / dev-only-keycloak-admin).
+  # В продукте Keycloak организации подключается к AD/LDAP (федерация пользователей), см. docs/07-security-compliance.md.
+  keycloak:
+    # Тот же образ, что quay.io/keycloak/keycloak (Apache-2.0), — зеркало на Docker Hub.
+    image: keycloak/keycloak:26.4@sha256:9409c59bdfb65dbffa20b11e6f18b8abb9281d480c7ca402f51ed3d5977e6007
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: dev-only-keycloak-admin
+      # Браузер ходит на localhost:8180, Synapse — по внутреннему адресу keycloak:8080; издатель токенов — всегда первый.
+      KC_HOSTNAME: http://localhost:8180
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "8180:8080"
+    volumes:
+      - ./keycloak/realm-konsilium.json:/opt/keycloak/data/import/realm-konsilium.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 5s
       timeout: 3s
       retries: 60
 

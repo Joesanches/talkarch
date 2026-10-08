@@ -41,6 +41,11 @@
 		reverse_proxy ccs:8080
 	}
 
+	# Единый вход: Keycloak (SSO=keycloak). Консоль администратора — /auth/admin, пароль — KC_ADMIN_PASSWORD в .env.
+	handle /auth/* {
+		reverse_proxy keycloak:8080
+	}
+
 	# Сигнализация звонков (WebSocket). Медиа идёт напрямую на LiveKit: UDP 7882, TCP 7881, TURN UDP 3478.
 	handle_path /livekit/* {
 		reverse_proxy livekit:7880

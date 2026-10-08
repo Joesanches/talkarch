@@ -6,6 +6,6 @@ export async function loginViaCaseLink(page: Page, user: string, connector: stri
   await page.goto(`/c/${connector}/${encodeURIComponent(caseId)}`);
   await page.getByLabel('Логин').fill(user);
   await page.getByLabel('Пароль').fill(DEV_PASSWORD);
-  await page.getByRole('button', { name: 'Войти' }).click();
+  await page.getByRole('button', { name: 'Войти', exact: true }).click();
   await expect(page.getByLabel('Карточка случая')).toContainText(caseId);
 }

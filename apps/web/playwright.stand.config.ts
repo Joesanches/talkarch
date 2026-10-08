@@ -4,7 +4,8 @@ import { defineConfig } from '@playwright/test';
 /**
  * Сквозные тесты против развёрнутого стенда (deploy/stand). Пример для стенда на localhost:
  *   cd deploy/stand && ./stand.sh ca > /tmp/stand-ca.crt && set -a && . ./.env && set +a && cd -
- *   STAND_URL=https://localhost DEV_USERS_PASSWORD=$DEMO_PASSWORD E2E_LIS_TOKEN=$LIS_TOKEN \
+ *   STAND_URL=https://localhost DEV_USERS_PASSWORD=$DEMO_PASSWORD E2E_LIS_TOKEN=$LIS_TOKEN E2E_RIS_TOKEN=$RIS_TOKEN \
+ *   E2E_RIS_DEMO_URL=https://localhost/sandbox/ris \
  *   NODE_EXTRA_CA_CERTS=/tmp/stand-ca.crt npx playwright test -c playwright.stand.config.ts
  */
 const stand = process.env.STAND_URL ?? 'https://localhost';

@@ -14,7 +14,7 @@ test('встраивание в РИС: панель чата, ключевой 
   await test.step('вход во фрейме — чат открытого исследования', async () => {
     await chat.getByLabel('Логин').fill('orlov');
     await chat.getByLabel('Пароль').fill(DEV_PASSWORD);
-    await chat.getByRole('button', { name: 'Войти' }).click();
+    await chat.getByRole('button', { name: 'Войти', exact: true }).click();
     await expect(chat.getByLabel('Карточка случая')).toContainText('A26-118734');
     await expect(chat.getByLabel('Карточка случая')).toContainText('С*** В. П.');
   });

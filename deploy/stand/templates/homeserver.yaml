@@ -56,3 +56,5 @@ room_prejoin_state:
     - ru.vendor.case.context
     # Статусы критических находок: приглашённый эскалацией сразу видит в списке, что его ждёт находка.
     - ru.vendor.critical.status
+
+__OIDC_YAML__

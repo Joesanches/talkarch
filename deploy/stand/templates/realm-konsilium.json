@@ -1,0 +1,187 @@
+{
+  "realm": "konsilium",
+  "displayName": "Консилиум — тестовый стенд",
+  "enabled": true,
+  "internationalizationEnabled": true,
+  "supportedLocales": [
+    "ru"
+  ],
+  "defaultLocale": "ru",
+  "sslRequired": "external",
+  "loginWithEmailAllowed": false,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "bruteForceProtected": true,
+  "clients": [
+    {
+      "clientId": "synapse",
+      "name": "Консилиум (Synapse)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "__OIDC_SECRET__",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "https://__DOMAIN__/_synapse/client/oidc/callback"
+      ],
+      "webOrigins": [],
+      "attributes": {
+        "post.logout.redirect.uris": "https://__DOMAIN__/*"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "smirnova",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "smirnova@stand.invalid",
+      "firstName": "А. В.",
+      "lastName": "Смирнова",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "__DEMO_PASSWORD__",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "ershova",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "ershova@stand.invalid",
+      "firstName": "Т. Н.",
+      "lastName": "Ершова",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "__DEMO_PASSWORD__",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "kolesnikov",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "kolesnikov@stand.invalid",
+      "firstName": "Д. А.",
+      "lastName": "Колесников",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "__DEMO_PASSWORD__",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "gusev",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "gusev@stand.invalid",
+      "firstName": "П. Р.",
+      "lastName": "Гусев",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "__DEMO_PASSWORD__",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "petrov",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "petrov@stand.invalid",
+      "firstName": "С. В.",
+      "lastName": "Петров",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "__DEMO_PASSWORD__",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "orlov",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "orlov@stand.invalid",
+      "firstName": "К. М.",
+      "lastName": "Орлов",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "__DEMO_PASSWORD__",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "safonova",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "safonova@stand.invalid",
+      "firstName": "Е. И.",
+      "lastName": "Сафонова",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "__DEMO_PASSWORD__",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "melnikova",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "melnikova@stand.invalid",
+      "firstName": "Н. А.",
+      "lastName": "Мельникова",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "__DEMO_PASSWORD__",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "belova",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "belova@stand.invalid",
+      "firstName": "Л. Р.",
+      "lastName": "Белова",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "__DEMO_PASSWORD__",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "outsider",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "outsider@stand.invalid",
+      "firstName": "пользователь",
+      "lastName": "Посторонний",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "__DEMO_PASSWORD__",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

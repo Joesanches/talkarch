@@ -12,7 +12,7 @@ test('врач открывает чат случая по ссылке из Л�
     await page.goto(`/c/lis/${encodeURIComponent(CASE)}`);
     await page.getByLabel('Логин').fill('smirnova');
     await page.getByLabel('Пароль').fill(PASSWORD);
-    await page.getByRole('button', { name: 'Войти' }).click();
+    await page.getByRole('button', { name: 'Войти', exact: true }).click();
   });
 
   const bar = page.getByLabel('Карточка случая');
@@ -106,6 +106,6 @@ test('без прав в ЛИС чат не открывается', async ({ pa
   await page.goto(`/c/lis/${encodeURIComponent('Г26-04530')}`);
   await page.getByLabel('Логин').fill('ershova');
   await page.getByLabel('Пароль').fill(PASSWORD);
-  await page.getByRole('button', { name: 'Войти' }).click();
+  await page.getByRole('button', { name: 'Войти', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Нет доступа к случаю');
 });

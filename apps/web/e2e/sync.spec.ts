@@ -10,7 +10,7 @@ async function login(page: Page, path = '/') {
   await page.getByLabel('Логин').fill('smirnova');
   await page.getByLabel('Пароль').fill(DEV_PASSWORD);
   const t0 = Date.now();
-  await page.getByRole('button', { name: 'Войти' }).click();
+  await page.getByRole('button', { name: 'Войти', exact: true }).click();
   await expect(page.getByRole('option').first()).toBeVisible();
   return { requests, firstScreenMs: Date.now() - t0 };
 }

@@ -96,7 +96,12 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
         <div className="avatar person small" style={{ background: avatarColor(session.userId) }} title={myName}>
           {initials(myName)}
         </div>
-        <button className="rail-item" onClick={onLogout} title="Выйти">
+        <button
+          className="rail-item"
+          // Токен отзывается на сервере, а не только забывается браузером. Сессия в Keycloak остаётся (единый вход).
+          onClick={() => void client.logout(true).catch(() => undefined).finally(onLogout)}
+          title="Выйти"
+        >
           <Icon name="logout" />
           <span>Выйти</span>
         </button>

@@ -1350,3 +1350,10 @@ button:disabled {
     flex: 1 0 100%;
   }
 }
+
+.login-divider {
+  margin: 4px 0 -4px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-neutral-text-meta);
+}

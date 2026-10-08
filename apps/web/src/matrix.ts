@@ -49,6 +49,44 @@ export function clearSession() {
   }
 }
 
+export interface LoginOptions {
+  password: boolean;
+  /** Поставщики единого входа (Keycloak организации и т. п.). */
+  sso: Array<{ id: string; name: string }>;
+}
+
+/** Какие способы входа предлагает сервер: единый вход и/или пароль. */
+export async function loginOptions(): Promise<LoginOptions> {
+  const { flows } = await createClient({ baseUrl: config.hsUrl }).loginFlows();
+  const sso = flows.find((f) => f.type === 'm.login.sso') as { identity_providers?: Array<{ id: string; name: string }> } | undefined;
+  return { password: flows.some((f) => f.type === 'm.login.password'), sso: sso?.identity_providers ?? [] };
+}
+
+/** Адрес входа через поставщика: после него сервер вернёт пользователя на `redirectUrl` с одноразовым `loginToken`. */
+export function ssoLoginUrl(redirectUrl: string, idpId: string): string {
+  return createClient({ baseUrl: config.hsUrl }).getSsoLoginUrl(redirectUrl, 'sso', idpId);
+}
+
+const tokenLogins = new Map<string, Promise<Session>>();
+
+/**
+ * Обменять одноразовый `loginToken` единого входа на сессию. Повторный вызов с тем же токеном (строгий режим React
+ * вызывает эффекты дважды) получает тот же результат, а не ошибку «токен уже использован».
+ */
+export function loginWithToken(token: string): Promise<Session> {
+  let p = tokenLogins.get(token);
+  if (!p) {
+    p = createClient({ baseUrl: config.hsUrl })
+      .loginRequest({ type: 'm.login.token', token, initial_device_display_name: 'Консилиум · веб' })
+      .then((r) => ({ baseUrl: config.hsUrl, userId: r.user_id, accessToken: r.access_token, deviceId: r.device_id }));
+    tokenLogins.set(token, p);
+  }
+  return p;
+}
+
+/** Сообщение всплывающего окна единого входа фрейму, который его открыл. */
+export const SSO_MESSAGE = 'konsilium-sso';
+
 export async function login(username: string, password: string): Promise<Session> {
   const tmp = createClient({ baseUrl: config.hsUrl });
   const r = await tmp.loginRequest({

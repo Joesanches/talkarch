@@ -63,6 +63,7 @@ export function EmbedApp() {
     return (
       <div className="embed">
         <Login
+          sso="popup"
           onLogin={(s) => {
             saveSession(s);
             setSession(s);
