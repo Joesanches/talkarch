@@ -6,6 +6,7 @@ import type { AppDeps } from '../app.ts';
 import { ForbiddenError } from '../calls.ts';
 import { HostError } from '../host.ts';
 import { MatrixError } from '../matrix.ts';
+import { SecretaryError } from '../secretary.ts';
 
 const OpenCaseBody = z
   .object({
@@ -16,6 +17,7 @@ const OpenCaseBody = z
   })
   .refine((b) => b.connector || b.system, { message: 'Укажите connector или system' });
 const PatientBody = z.object({ roomId: z.string().startsWith('!'), reason: z.string().max(200).optional() });
+const SecretaryBody = z.object({ roomId: z.string().startsWith('!'), action: z.enum(['start', 'stop']) });
 const CallTokenBody = z.object({ roomId: z.string().startsWith('!'), callId: z.string().regex(/^[\w.-]{1,64}$/).optional() });
 
 function bearer(req: FastifyRequest): string | null {
@@ -136,9 +138,31 @@ export async function clientRoutes(app: FastifyInstance, deps: AppDeps) {
     const body = CallTokenBody.safeParse(req.body);
     if (!body.success) return mxError(reply, 400, 'M_BAD_JSON', issues(body.error));
     try {
-      return await deps.calls.issue(token, body.data.roomId, body.data.callId);
+      const issued = await deps.calls.issue(token, body.data.roomId, body.data.callId);
+      // Клиент показывает кнопку стенограммы, только если «Секретарь» включён политикой организации.
+      return { ...issued, secretary: deps.secretary.enabled ? { eta_minutes: deps.secretary.etaMinutes } : null };
     } catch (e) {
       if (e instanceof ForbiddenError) return mxError(reply, 403, 'M_FORBIDDEN', e.message);
+      throw e;
+    }
+  });
+
+  /** ИИ-«Секретарь»: включить или выключить стенограмму звонка. Только для вошедших участников. */
+  app.post('/calls/secretary', async (req, reply) => {
+    const token = bearer(req);
+    if (!token || !(await currentUser(req))) return mxError(reply, 401, 'M_UNAUTHORIZED', 'Нужен токен Matrix');
+    const body = SecretaryBody.safeParse(req.body);
+    if (!body.success) return mxError(reply, 400, 'M_BAD_JSON', issues(body.error));
+    try {
+      if (body.data.action === 'start') {
+        await deps.secretary.start(token, body.data.roomId);
+        return { status: 'started', eta_minutes: deps.secretary.etaMinutes };
+      }
+      await deps.secretary.stop(token, body.data.roomId);
+      return { status: 'stopping' };
+    } catch (e) {
+      if (e instanceof ForbiddenError) return mxError(reply, 403, 'M_FORBIDDEN', e.message);
+      if (e instanceof SecretaryError) return mxError(reply, e.status, e.status === 409 ? 'M_CONFLICT' : 'M_UNAVAILABLE', e.message);
       throw e;
     }
   });

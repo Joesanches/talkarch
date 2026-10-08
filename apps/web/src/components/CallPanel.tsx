@@ -2,7 +2,7 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import { ConnectionState, Room, RoomEvent, Track, type Participant, type Track as LkTrack } from 'livekit-client';
 import type { MatrixClient, Room as MatrixRoom } from 'matrix-js-sdk';
 import { RoomType } from '@konsilium/protocol';
-import { formatDuration, markCallEnded, markCallStarted, requestCallToken } from '../call.ts';
+import { activeCall, formatDuration, isHuman, markCallEnded, markCallStarted, requestCallToken, setSecretary } from '../call.ts';
 import type { Session } from '../matrix.ts';
 import { avatarColor, initials } from '../model.ts';
 import { Icon } from './Icon.tsx';
@@ -60,6 +60,11 @@ export function CallPanel(props: {
   const [error, setError] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [secretary, setSecretaryAvail] = useState<{ eta_minutes: number } | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiNote, setAiNote] = useState<string | null>(null);
+  // После «Остановить» агент дочитывает звук и отдаёт итоги — до снятия индикатора кнопка неактивна.
+  const [aiStopping, setAiStopping] = useState(false);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -87,6 +92,7 @@ export function CallPanel(props: {
       try {
         const t = await requestCallToken(session, room.roomId);
         if (!alive) return;
+        setSecretaryAvail(room.getType() === RoomType.Case ? (t.secretary ?? null) : null);
         await lkRoom.connect(t.url, t.token);
         if (!alive) return void lkRoom.disconnect();
         setStartedAt(Date.now());
@@ -106,14 +112,45 @@ export function CallPanel(props: {
   }, [client, session, room, video]);
 
   async function leave() {
-    // Последний вышедший закрывает звонок в комнате.
-    if (lk && lk.remoteParticipants.size === 0) await markCallEnded(client, room).catch(() => undefined);
+    // Последний вышедший человек закрывает звонок в комнате (ИИ-агент не в счёт — он выйдет сам).
+    if (lk && ![...lk.remoteParticipants.values()].some((p) => isHuman(p.identity))) await markCallEnded(client, room).catch(() => undefined);
     await lk?.disconnect();
     props.onLeave();
   }
 
   const local = lk?.localParticipant;
-  const participants: Participant[] = lk && local ? [local, ...lk.remoteParticipants.values()] : [];
+  // Плитки — только люди; ИИ-«Секретарь» виден индикатором стенограммы.
+  const participants: Participant[] = lk && local ? [local, ...[...lk.remoteParticipants.values()].filter((p) => isHuman(p.identity))] : [];
+  const transcription = activeCall(room)?.transcription;
+  // Индикатор — и по состоянию комнаты, и по факту: ИИ-агент подключён к звонку (токены агентам выдаёт только сервис).
+  const agentListening = [...(lk?.remoteParticipants.values() ?? [])].some((p) => !isHuman(p.identity));
+  const recording = !!transcription || agentListening;
+  useEffect(() => {
+    if (!transcription) setAiStopping(false);
+  }, [transcription]);
+
+  async function toggleTranscript() {
+    setAiBusy(true);
+    setError(null);
+    try {
+      const r = await setSecretary(session, room.roomId, transcription ? 'stop' : 'start');
+      setAiStopping(r.status !== 'started');
+      setAiNote(
+        r.status === 'started'
+          ? null
+          : `Стенограмма остановлена. Стенограмма и черновик протокола появятся в чате${secretary ? ` примерно через ${secretary.eta_minutes} мин` : ''}.`,
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setAiBusy(false);
+    }
+  }
+  const transcriptBadge = recording && (
+    <span className="rec" role="status" title="Речь участников распознаётся в контуре организации">
+      Стенограмма (ИИ)
+    </span>
+  );
   const screen = participants.find((p) => {
     const pub = p.getTrackPublication(Track.Source.ScreenShare);
     return pub?.track && !pub.isMuted;
@@ -153,6 +190,7 @@ export function CallPanel(props: {
         <span className="callbar-dot" />
         <span className="callbar-title">Звонок · {room.name}</span>
         <span className="callbar-status">{status} · {participants.length} уч.</span>
+        {transcriptBadge}
         <button className="ghost" onClick={() => props.onMinimize(false)}>Вернуться</button>
         <button className="ghost danger" onClick={() => void leave()}>Завершить</button>
         {audio}
@@ -167,6 +205,7 @@ export function CallPanel(props: {
           <div className="call-title">{room.name}</div>
           <div className="call-status">
             {status} · {participants.length} {participants.length === 1 ? 'участник' : participants.length < 5 ? 'участника' : 'участников'}
+            {transcriptBadge}
           </div>
         </div>
         <button className="call-icon" onClick={() => props.onMinimize(true)} aria-label="Свернуть звонок" title="Свернуть">
@@ -174,6 +213,11 @@ export function CallPanel(props: {
         </button>
       </div>
       {error && <div className="call-error" role="alert">{error}</div>}
+      {aiNote && (
+        <div className="call-note" role="status">
+          {aiNote}
+        </div>
+      )}
       <div className={`call-stage${screen ? ' with-screen' : ''}`}>
         {screen && <Tile p={screen} local={screen === local} screen />}
         <div className={`call-grid n${Math.min(participants.length, 9)}`}>
@@ -192,6 +236,18 @@ export function CallPanel(props: {
         <button className={`call-btn${local?.isScreenShareEnabled ? ' on' : ''}`} onClick={() => void toggle('screen')} aria-label="Показать экран">
           <Icon name="screen" />
         </button>
+        {(secretary || transcription) && (
+          <button
+            className={`call-btn${transcription ? ' on' : ''}`}
+            onClick={() => void toggleTranscript()}
+            disabled={aiBusy || aiStopping}
+            aria-pressed={!!transcription}
+            aria-label={transcription ? 'Остановить стенограмму' : 'Включить стенограмму (ИИ)'}
+            title={transcription ? 'Остановить стенограмму' : `Стенограмма и черновик протокола (ИИ-«Секретарь»)${secretary ? `, итоги ~${secretary.eta_minutes} мин после звонка` : ''}`}
+          >
+            <Icon name="transcript" />
+          </button>
+        )}
         <button className="call-btn hangup" onClick={() => void leave()} aria-label="Выйти из звонка">
           <Icon name="hangup" />
         </button>

@@ -118,6 +118,51 @@ services:
     depends_on:
       ccs: { condition: service_healthy }
 
+  # ── ИИ-«Секретарь» (AI=cpu → COMPOSE_PROFILES=ai) ──────────────────────
+  # Распознавание русской речи: vosk-server с моделью kaldi-ru (Apache-2.0). ~6 ГБ памяти.
+  vosk:
+    profiles: [ai]
+    image: alphacep/kaldi-ru@sha256:02a2656ab505026cd1f6a2751c1d880bce30068150a4a1e10acd29eb65ecf650
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 2700), 2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
+  # LLM для черновика протокола: Docker Model Runner (llama.cpp), OpenAI-совместимый API.
+  llm:
+    profiles: [ai]
+    image: docker/model-runner@sha256:5bdc2bac71c1b70453f7dec5b527031bc6d8d99b8d1b2a10a8bcca073ae257a3
+    restart: unless-stopped
+    environment:
+      SSL_CERT_FILE: ${LLM_SSL_CERT_FILE:-}
+    volumes:
+      - models:/models
+      - ${BUILD_CA_FILE:-/dev/null}:/etc/konsilium/ca.crt:ro
+
+  # Однократно скачивает модель в том models (при повторных запусках — из кеша).
+  llm-model:
+    profiles: [ai]
+    image: docker/model-runner@sha256:5bdc2bac71c1b70453f7dec5b527031bc6d8d99b8d1b2a10a8bcca073ae257a3
+    entrypoint: ["curl", "-fsS", "--retry", "30", "--retry-all-errors", "--retry-delay", "2", "-X", "POST", "http://llm:12434/models/create", "-d", '{"from":"ai/qwen3:1.7b-q4_K_M"}']
+    depends_on: [llm]
+
+  # Агент стенограммы: в звонке только на приём, распознаёт дорожку каждого участника.
+  secretary:
+    profiles: [ai]
+    image: konsilium-stand-secretary:latest
+    build:
+      context: ../../apps/secretary
+      secrets: [build_ca]
+    restart: unless-stopped
+    environment:
+      SECRETARY_TOKEN: ${SECRETARY_TOKEN:-}
+      ASR_URL: ws://vosk:2700
+    depends_on:
+      vosk: { condition: service_healthy }
+      llm-model: { condition: service_completed_successfully }
+
 secrets:
   # Корневой сертификат корпоративного прокси для сборки (если нужен): BUILD_CA_FILE=/путь/к/ca.crt в .env.
   build_ca:
@@ -128,3 +173,4 @@ volumes:
   synapse-data: {}
   caddy-data: {}
   caddy-config: {}
+  models: {}

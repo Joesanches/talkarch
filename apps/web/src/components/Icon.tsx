@@ -18,6 +18,7 @@ const paths: Record<string, string> = {
   screen: 'M3 5h18v11H3zM8 20h8M12 16v4M12 13V8M9.5 10.5L12 8l2.5 2.5',
   hangup: 'M3 15c5-5 13-5 18 0l-2 3-4-1.5v-2.5a10 10 0 0 0-6 0v2.5L5 18z',
   minimize: 'M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7',
+  transcript: 'M6 3h9l4 4v14H6zM15 3v4h4M9 11h7M9 15h7M9 19h4',
 };
 
 export function Icon({ name, size = 22 }: { name: keyof typeof paths | string; size?: number }) {

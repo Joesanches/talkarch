@@ -11,6 +11,7 @@ import { HttpHostCallbacks, type HostCallbacks } from './host.ts';
 import { InMemoryProcessedEvents, IntegrationService } from './integration.ts';
 import { HttpMatrixApi, type MatrixApi } from './matrix.ts';
 import { InMemoryRequestStore } from './requests.ts';
+import { OpenAiCompatibleLlm, SecretaryService, type LlmClient } from './secretary.ts';
 
 export interface ServiceOptions {
   logger?: boolean;
@@ -19,6 +20,8 @@ export interface ServiceOptions {
   connectors?: ConnectorRegistry;
   /** Подменить клиент Matrix (модульные тесты). */
   matrix?: MatrixApi;
+  /** Подменить LLM (тесты); null — без LLM. */
+  llm?: LlmClient | null;
 }
 
 /** Собрать сервис из конфигурации (используется в main, модульных и интеграционных тестах). */
@@ -42,6 +45,17 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
   const directory = new CaseDirectory({ registry, connectors, users, callbacksFor });
   const caseRooms = new CaseRoomService(matrix, roomStore, { aliasSecret: config.aliasSecret, serverName: config.serverName });
   const calls = new CallTokenService(matrix, { ...config.livekit, roomSecret: config.aliasSecret });
+  const secretary = new SecretaryService({
+    matrix,
+    calls,
+    log,
+    profile: config.ai.profile,
+    secretaryUrl: config.ai.secretaryUrl,
+    secretaryToken: config.ai.secretaryToken,
+    callbackBaseUrl: config.ai.callbackUrl,
+    asrUrl: config.ai.asrUrl,
+    llm: opts.llm !== undefined ? opts.llm : config.ai.llm ? new OpenAiCompatibleLlm(config.ai.llm.url, config.ai.llm.model, config.ai.llm.timeoutMs) : null,
+  });
   const app = buildApp({
     hsToken: config.hsToken,
     chatWebUrl: config.chatWebUrl,
@@ -54,6 +68,7 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
     calls,
     events: new EventProcessor({ matrix, directory, requests, users, log }),
     integration: new IntegrationService({ matrix, directory, registry, caseRooms, requests, processed, log }),
+    secretary,
     logger: opts.logger ?? true,
   });
   if (pool && config.databaseUrl) {
@@ -87,7 +102,7 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
         .catch((err) => app.log.warn({ err }, 'Ping Application Service не прошёл'));
     });
   }
-  return { app, matrix, connectors, registry, caseRooms, calls, directory };
+  return { app, matrix, connectors, registry, caseRooms, calls, directory, secretary };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

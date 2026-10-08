@@ -151,6 +151,7 @@ export const formatDue = (iso: string) => `до ${short.format(new Date(iso))}, 
 export function preview(e: TimelineItem | undefined, senderName: string, isMine: boolean): string {
   if (!e) return '';
   if (e.type === EventType.RequestStatus) return `Заявка ${e.content.external_id ?? ''}: ${stepLabel(e.content.status as RequestStep).toLowerCase()}`;
+  if (e.type === EventType.ReportStatus) return e.content.status === 'accepted' ? 'Черновик протокола принят' : 'Черновик протокола отклонён';
   if (e.type !== 'm.room.message') return '';
   const body = String(e.content.body ?? '').split('\n')[0] ?? '';
   if (e.content.msgtype === 'm.notice') return body;
@@ -253,4 +254,32 @@ export function reactionSummaries(items: TimelineItem[], me: string): Map<string
     );
   }
   return out;
+}
+
+export interface ReportDecision {
+  status: 'accepted' | 'rejected';
+  sender: string;
+  ts: number;
+}
+
+/**
+ * Решение по черновику (`ru.vendor.report.status` со ссылкой m.reference): действует первое.
+ * Повторное решение после принятия не меняет итог — исправления оформляются новым документом.
+ */
+export function reportDecisions(items: TimelineItem[]): Map<string, ReportDecision> {
+  const out = new Map<string, ReportDecision>();
+  for (const e of items) {
+    if (e.type !== EventType.ReportStatus) continue;
+    const rel = e.content['m.relates_to'] as { rel_type?: string; event_id?: string } | undefined;
+    const status = e.content.status;
+    if (rel?.rel_type !== 'm.reference' || !rel.event_id || (status !== 'accepted' && status !== 'rejected')) continue;
+    if (!out.has(rel.event_id)) out.set(rel.event_id, { status, sender: e.sender, ts: e.ts });
+  }
+  return out;
+}
+
+/** Смещение от начала звонка: «4:05». */
+export function offsetLabel(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }

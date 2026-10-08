@@ -1,5 +1,7 @@
 # Окружение разработчика PoC: PostgreSQL + Synapse + LiveKit.
 # Сервис контекста (apps/ccs) запускается на хосте: pnpm dev:ccs — Synapse ходит к нему через host.docker.internal.
+# Профиль ai — ИИ-«Секретарь» на процессоре: распознавание речи (Vosk), LLM (llama.cpp) и агент стенограммы:
+#   docker compose --profile ai up -d   (нужно ~10 ГБ памяти и ~9 ГБ на диске)
 # Все секреты здесь — только для разработки.
 name: konsilium-dev
 
@@ -63,6 +65,60 @@ services:
       - "7881:7881"
       - "7882:7882/udp"
 
+  # ── Профиль ai ────────────────────────────────────────────────────────
+  # Распознавание русской речи: vosk-server с моделью kaldi-ru (Apache-2.0), WebSocket :2700. ~6 ГБ памяти.
+  vosk:
+    profiles: [ai]
+    image: alphacep/kaldi-ru@sha256:02a2656ab505026cd1f6a2751c1d880bce30068150a4a1e10acd29eb65ecf650
+    ports:
+      - "2700:2700"
+    healthcheck:
+      # Модель грузится около минуты; до этого соединения сбрасываются.
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 2700), 2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
+  # LLM для черновика протокола: Docker Model Runner (llama.cpp), OpenAI-совместимый API на :12434/engines/v1.
+  llm:
+    profiles: [ai]
+    image: docker/model-runner@sha256:5bdc2bac71c1b70453f7dec5b527031bc6d8d99b8d1b2a10a8bcca073ae257a3
+    ports:
+      - "12434:12434"
+    volumes:
+      - models:/models
+
+  # Однократно скачивает модель (Qwen3 1.7B, Apache-2.0, ~1,1 ГБ) в том models.
+  llm-model:
+    profiles: [ai]
+    image: docker/model-runner@sha256:5bdc2bac71c1b70453f7dec5b527031bc6d8d99b8d1b2a10a8bcca073ae257a3
+    entrypoint: ["curl", "-fsS", "--retry", "30", "--retry-all-errors", "--retry-delay", "2", "-X", "POST", "http://llm:12434/models/create", "-d", '{"from":"${LLM_MODEL:-ai/qwen3:1.7b-q4_K_M}"}']
+    depends_on:
+      - llm
+
+  # Агент стенограммы: подключается к звонку LiveKit только на приём, распознаёт каждую дорожку, отдаёт результат сервису контекста.
+  secretary:
+    profiles: [ai]
+    build:
+      context: ../apps/secretary
+      secrets: [build_ca]
+    environment:
+      SECRETARY_TOKEN: dev-only-secretary-token-0123456789
+      ASR_URL: ws://vosk:2700
+    ports:
+      - "8070:8070"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      vosk:
+        condition: service_healthy
+
+secrets:
+  # Корневой сертификат корпоративного прокси для сборки агента (если нужен): BUILD_CA_FILE=/путь/к/ca.crt.
+  build_ca:
+    file: ${BUILD_CA_FILE:-/dev/null}
+
 volumes:
   pgdata: {}
   synapse-data: {}
+  models: {}

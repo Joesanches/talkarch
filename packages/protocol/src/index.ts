@@ -25,6 +25,8 @@ export const EventType = {
    */
   CaseRoles: `${NS}.case.roles`,
   RequestStatus: `${NS}.request.status`,
+  /** Принятие или отклонение черновика (протокола ИИ) врачом — ссылка на сообщение-черновик. */
+  ReportStatus: `${NS}.report.status`,
   Ack: `${NS}.ack`,
   Call: `${NS}.call`,
   CallInvite: `${NS}.call.invite`,
@@ -38,6 +40,7 @@ export const MsgType = {
   Critical: `${NS}.critical`,
   Report: `${NS}.report`,
   Incident: `${NS}.incident`,
+  Transcript: `${NS}.transcript`,
 } as const;
 
 /** Ключи реакций-статусов (`m.reaction` → `m.relates_to.key`). */
@@ -245,17 +248,91 @@ export const CallState = z.object({
   started_by: z.string().min(1),
   started_at: z.string(),
   ended_at: z.string().optional(),
+  /** Идёт стенограмма (ИИ-«Секретарь»): все участники видят индикатор. */
+  transcription: z
+    .object({ started_by: z.string().min(1), started_at: z.string(), profile: z.enum(['gpu', 'cpu', 'external']) })
+    .optional(),
 });
 export type CallState = z.infer<typeof CallState>;
 
+/**
+ * Фрагмент стенограммы: у каждого говорящего своя дорожка, поэтому атрибуция точная.
+ * Время — миллисекунды от начала стенограммы, целые: канонический JSON Matrix не допускает дробных чисел.
+ */
+export const TranscriptSegment = z.object({
+  i: z.number().int().nonnegative(),
+  speaker: z.string().min(1),
+  name: z.string().min(1),
+  start_ms: z.number().int().nonnegative(),
+  end_ms: z.number().int().nonnegative(),
+  text: z.string().min(1),
+});
+export type TranscriptSegment = z.infer<typeof TranscriptSegment>;
+
+/** Стенограмма звонка — `m.room.message` с msgtype `ru.vendor.transcript`. */
+export const TranscriptMessage = MessageBase.extend({
+  msgtype: z.literal(MsgType.Transcript),
+  [MsgType.Transcript]: z.object({
+    call_id: z.string().min(1),
+    started_at: z.string(),
+    ended_at: z.string(),
+    segments: z.array(TranscriptSegment),
+    /** Стенограмма длиннее предела события — в сообщении начало, полный текст — файлом (план). */
+    truncated: z.boolean().default(false),
+    asr: z.object({ engine: z.string(), profile: z.enum(['gpu', 'cpu', 'external']) }),
+  }),
+});
+export type TranscriptMessage = z.infer<typeof TranscriptMessage>;
+
+/** Утверждение черновика со ссылками на фрагменты стенограммы (номера `i`). */
+export const DraftStatement = z.object({ speaker: z.string().optional(), text: z.string().min(1), refs: z.array(z.number().int().nonnegative()).default([]) });
+export type DraftStatement = z.infer<typeof DraftStatement>;
+
+/**
+ * Черновик протокола консилиума — msgtype `ru.vendor.report`, kind consilium_protocol.
+ * Пациент, случай, состав и время — из систем, а не от ИИ (docs/08-video-ai.md, 5.4).
+ */
+export const ProtocolDraft = MessageBase.extend({
+  msgtype: z.literal(MsgType.Report),
+  [MsgType.Report]: z.object({
+    kind: z.literal('consilium_protocol'),
+    status: z.literal('draft'),
+    generated_by: z.enum(['llm', 'template']),
+    model: z.string().optional(),
+    transcript_event_id: z.string().optional(),
+    meeting: z.object({ date: z.string(), start: z.string(), end: z.string(), form: z.enum(['remote', 'in_person', 'mixed']) }),
+    participants: z.array(z.object({ name: z.string(), mxid: z.string(), role: z.string().optional() })),
+    case: z.object({ connector: z.string(), case_id: z.string(), title: z.string(), patient: z.string() }).nullable(),
+    sections: z.object({
+      purpose: z.array(DraftStatement).default([]),
+      clinical: z.array(DraftStatement).default([]),
+      discussion: z.array(DraftStatement).default([]),
+      decision: z.array(DraftStatement).default([]),
+      dissent: z.array(DraftStatement).default([]),
+    }),
+  }),
+});
+export type ProtocolDraft = z.infer<typeof ProtocolDraft>;
+
+/** `ru.vendor.report.status`: врач принял или отклонил черновик. Кто и когда — в событии (журнал). */
+export const ReportStatusContent = z.object({
+  'm.relates_to': z.object({ rel_type: z.literal('m.reference'), event_id: z.string().min(1) }),
+  status: z.enum(['accepted', 'rejected']),
+});
+export type ReportStatusContent = z.infer<typeof ReportStatusContent>;
+
 /** Разбор `m.room.message` в один из структурированных типов; остальное — `null`. */
-export function parseStructured(content: unknown): KeyImage | SlideRoi | RequestMessage | CriticalMessage | null {
+export function parseStructured(
+  content: unknown,
+): KeyImage | SlideRoi | RequestMessage | CriticalMessage | TranscriptMessage | ProtocolDraft | null {
   const msgtype = (content as { msgtype?: unknown } | null)?.msgtype;
   const schema = {
     [MsgType.KeyImage]: KeyImage,
     [MsgType.SlideRoi]: SlideRoi,
     [MsgType.Request]: RequestMessage,
     [MsgType.Critical]: CriticalMessage,
+    [MsgType.Transcript]: TranscriptMessage,
+    [MsgType.Report]: ProtocolDraft,
   }[msgtype as string];
   if (!schema) return null;
   const result = schema.safeParse(content);

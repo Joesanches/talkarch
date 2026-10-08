@@ -27,7 +27,9 @@ usage() {
 
 Переменные для init: TLS_MODE=internal — свой сертификат вместо Let's Encrypt;
 NODE_IP=<адрес> — адрес для медиа звонков, если автоопределение не подходит;
-EMBED_ORIGINS="https://ris.example.ru …" — страницы РИС/ЛИС, которым можно встраивать чат.
+EMBED_ORIGINS="https://ris.example.ru …" — страницы РИС/ЛИС, которым можно встраивать чат;
+AI=cpu — ИИ-«Секретарь» (стенограмма звонка и черновик протокола) на процессоре: +8 ГБ ОЗУ, +10 ГБ диска;
+LLM_URL=… LLM_MODEL=… — внешний OpenAI-совместимый ИИ-шлюз вместо LLM на стенде (с AI=cpu).
 USAGE
 }
 
@@ -36,7 +38,7 @@ render() { # render <шаблон> <файл>
   content=$(<"$src")
   for var in DOMAIN DOMAIN_RE PG_PASSWORD REG_SECRET MACAROON_SECRET FORM_SECRET AS_TOKEN HS_TOKEN ALIAS_SECRET \
     LIVEKIT_KEY LIVEKIT_SECRET LIVEKIT_IP LIS_TOKEN LIS_TOKEN_SHA RIS_TOKEN RIS_TOKEN_SHA TEAM_TOKEN_SHA \
-    LIS_CALLBACK_TOKEN DEMO_PASSWORD EMBED_ORIGINS_JSON; do
+    LIS_CALLBACK_TOKEN DEMO_PASSWORD EMBED_ORIGINS_JSON AI_ENV; do
     content=${content//"__${var}__"/"${!var}"}
   done
   printf '%s\n' "$content" >"$dst"
@@ -45,9 +47,15 @@ render() { # render <шаблон> <файл>
 cmd_init() {
   local domain=${1:-} email=${2:-}
   [[ -n $domain ]] || die "укажите домен: ./stand.sh init chat-test.example.ru admin@example.ru"
+  # Заданное в командной строке (NODE_IP=… AI=cpu ./stand.sh init …) важнее сохранённого в .env.
+  local overrides=() v
+  for v in TLS_MODE NODE_IP EMBED_ORIGINS AI LLM_URL LLM_MODEL BUILD_CA_FILE; do
+    [[ -n ${!v+x} ]] && overrides+=("$v=${!v}")
+  done
   if [[ -f $ENV_FILE ]]; then
     # shellcheck disable=SC1090
     set -a; . "./$ENV_FILE"; set +a
+    for v in "${overrides[@]}"; do export "${v%%=*}=${v#*=}"; done
     if [[ ${DOMAIN:-} != "$domain" ]]; then
       echo "Внимание: домен меняется с ${DOMAIN:-?} на $domain. Synapse не поддерживает смену имени сервера —" >&2
       echo "для нового домена выполните ./stand.sh destroy и init заново." >&2
@@ -73,6 +81,14 @@ cmd_init() {
   TEAM_TOKEN=${TEAM_TOKEN:-team-$(rand 40)}
   LIS_CALLBACK_TOKEN=${LIS_CALLBACK_TOKEN:-cb-$(rand 40)}
   DEMO_PASSWORD=${DEMO_PASSWORD:-$(rand 14)}
+  AI=${AI:-off}
+  [[ $AI == off || $AI == cpu ]] || die "AI=off или AI=cpu"
+  SECRETARY_TOKEN=${SECRETARY_TOKEN:-$(rand 48)}
+  LLM_URL=${LLM_URL:-}
+  LLM_MODEL=${LLM_MODEL:-}
+  if [[ $AI == cpu ]]; then COMPOSE_PROFILES=ai; else COMPOSE_PROFILES=; fi
+  # Сертификат прокси нужен и LLM-сервису: он скачивает модель при первом запуске.
+  if [[ $AI == cpu && -n ${BUILD_CA_FILE:-} ]]; then LLM_SSL_CERT_FILE=/etc/konsilium/ca.crt; else LLM_SSL_CERT_FILE=; fi
 
   umask 077
   cat >"$ENV_FILE" <<ENV
@@ -99,6 +115,13 @@ LIS_CALLBACK_TOKEN=$LIS_CALLBACK_TOKEN
 DEMO_PASSWORD=$DEMO_PASSWORD
 # Корневой сертификат корпоративного прокси для сборки образов (если сеть подменяет TLS).
 BUILD_CA_FILE=${BUILD_CA_FILE:-}
+# ИИ-«Секретарь»: off | cpu. Внешний ИИ-шлюз — LLM_URL и LLM_MODEL (пусто — LLM на стенде).
+AI=$AI
+COMPOSE_PROFILES=$COMPOSE_PROFILES
+SECRETARY_TOKEN=$SECRETARY_TOKEN
+LLM_URL=$LLM_URL
+LLM_MODEL=$LLM_MODEL
+LLM_SSL_CERT_FILE=$LLM_SSL_CERT_FILE
 ENV
 
   DOMAIN_RE=${DOMAIN//./\\.}
@@ -107,6 +130,19 @@ ENV
   LIS_TOKEN_SHA=$(sha "$LIS_TOKEN")
   RIS_TOKEN_SHA=$(sha "$RIS_TOKEN")
   TEAM_TOKEN_SHA=$(sha "$TEAM_TOKEN")
+  if [[ $AI == cpu ]]; then
+    AI_ENV="# ИИ-«Секретарь»: агент и распознавание речи на стенде, токен LiveKit агента — по внутреннему адресу.
+SECRETARY_URL=http://secretary:8070
+SECRETARY_TOKEN=$SECRETARY_TOKEN
+AI_PROFILE=cpu
+ASR_URL=ws://vosk:2700
+LIVEKIT_INTERNAL_URL=ws://livekit:7880
+CCS_CALLBACK_URL=http://ccs:8080
+LLM_URL=${LLM_URL:-http://llm:12434/engines/v1}
+LLM_MODEL=${LLM_MODEL:-ai/qwen3:1.7b-q4_K_M}"
+  else
+    AI_ENV='# ИИ-«Секретарь» выключен (AI=off)'
+  fi
   if [[ -n $NODE_IP ]]; then
     LIVEKIT_IP=$'  node_ip: '"$NODE_IP"$'\n  use_external_ip: false'
   else
@@ -139,6 +175,7 @@ cmd_up() {
   echo "Стенд работает: https://$DOMAIN"
   echo "Демо-пользователи: ./stand.sh users. Ссылка на чат случая: https://$DOMAIN/c/lis/Г26-04512"
   echo "Встраивание в РИС (демо): https://$DOMAIN/sandbox/ris"
+  if [[ ${AI:-off} == cpu ]]; then echo "ИИ-«Секретарь» включён: кнопка «Стенограмма» в звонке чата случая."; fi
 }
 
 run_users() { compose run --rm --no-deps host-mock node --import tsx apps/host-mock/src/users.ts "$@"; }

@@ -7,3 +7,6 @@ infra/.data/
 .DS_Store
 test-results
 playwright-report
+.venv/
+__pycache__/
+.pytest_cache/

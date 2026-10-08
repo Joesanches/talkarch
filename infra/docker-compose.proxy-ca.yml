@@ -1,0 +1,8 @@
+# Сеть с корпоративным прокси, который подменяет TLS: LLM-сервису нужен корневой сертификат, чтобы скачать модель.
+#   PROXY_CA_FILE=/путь/к/ca.crt docker compose -f docker-compose.yml -f docker-compose.proxy-ca.yml --profile ai up -d
+services:
+  llm:
+    environment:
+      SSL_CERT_FILE: /etc/konsilium/ca.crt
+    volumes:
+      - ${PROXY_CA_FILE:?укажите PROXY_CA_FILE}:/etc/konsilium/ca.crt:ro

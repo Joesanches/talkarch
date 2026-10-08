@@ -6,9 +6,11 @@ import type { ConnectorRegistry, UserResolver } from './connectors.ts';
 import type { EventProcessor } from './events.ts';
 import type { IntegrationService } from './integration.ts';
 import type { MatrixApi } from './matrix.ts';
+import type { SecretaryService } from './secretary.ts';
 import { appserviceRoutes } from './routes/appservice.ts';
 import { clientRoutes } from './routes/client.ts';
 import { integrationRoutes } from './routes/integration.ts';
+import { internalRoutes } from './routes/internal.ts';
 
 export interface AppDeps {
   hsToken: string;
@@ -23,6 +25,7 @@ export interface AppDeps {
   calls: CallTokenService;
   events: EventProcessor;
   integration: IntegrationService;
+  secretary: SecretaryService;
   logger?: boolean;
 }
 
@@ -38,5 +41,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.register(async (scope) => clientRoutes(scope, deps), { prefix: '/api/v1' });
   app.register(async (scope) => integrationRoutes(scope, deps), { prefix: '/integration/v1' });
   app.register(async (scope) => appserviceRoutes(scope, deps), { prefix: '/_matrix/app/v1' });
+  // Внутренние вызовы сервисов контура (ИИ-агенты); наружу через шлюз не публикуются.
+  app.register(async (scope) => internalRoutes(scope, deps), { prefix: '/internal/v1' });
   return app;
 }

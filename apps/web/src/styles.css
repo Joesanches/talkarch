@@ -1114,3 +1114,126 @@ button:disabled {
 .msg.out .reaction-menu {
   right: 0;
 }
+
+/* ── ИИ-«Секретарь»: индикатор, стенограмма, черновик протокола ──── */
+.rec {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: rgb(255 255 255 / 0.14);
+}
+.rec::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-semantic-critical);
+}
+.callbar .rec {
+  color: var(--color-semantic-critical-text);
+  background: var(--color-semantic-critical-soft);
+}
+.call-note {
+  margin: 0 16px 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 0.1);
+  color: #fff;
+  font-size: 13px;
+}
+.bubble.wide {
+  width: min(620px, 92%);
+  max-width: none;
+}
+.ai-card {
+  display: grid;
+  gap: 6px;
+  padding: 2px 0;
+}
+.ai-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.chip.ai {
+  background: var(--color-semantic-warning-soft);
+  color: var(--color-semantic-warning-text);
+}
+.segments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.seg-time {
+  display: inline-block;
+  min-width: 3.2em;
+  margin-right: 4px;
+  color: var(--color-neutral-text-meta);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.segments b,
+.ai-card blockquote b {
+  margin-right: 4px;
+}
+.draft-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 10px;
+  margin: 2px 0;
+  font-size: 13px;
+}
+.draft-meta dt {
+  color: var(--color-neutral-text-meta);
+}
+.draft-meta dd {
+  margin: 0;
+}
+.draft-section h4 {
+  margin: 6px 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-neutral-text-secondary);
+}
+.draft-section ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.draft-section li {
+  margin: 2px 0;
+}
+.ref {
+  border: 0;
+  padding: 0 3px;
+  border-radius: 4px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.ai-card blockquote {
+  margin: 4px 0;
+  padding: 4px 8px;
+  border-left: 3px solid var(--color-bubble-quote);
+  background: var(--color-neutral-surface-muted);
+  border-radius: 0 6px 6px 0;
+  font-size: 13px;
+}
+.draft-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}

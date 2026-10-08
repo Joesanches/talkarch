@@ -5,6 +5,7 @@ import { createHostMock, type HostMock } from '@konsilium/host-mock';
 import type { Config } from '../../src/config.ts';
 import { ConnectorRegistry } from '../../src/connectors.ts';
 import { createService } from '../../src/index.ts';
+import type { LlmClient } from '../../src/secretary.ts';
 import { FakeMatrix } from './fakeMatrix.ts';
 
 export const SERVER = 'konsilium.test';
@@ -30,6 +31,7 @@ export const testConfig: Config = {
   connectorsFile: '-',
   chatWebUrl: 'https://chat.clinic.local',
   livekit: { url: 'ws://lk', apiKey: 'devkey', apiSecret: 'secret-secret-secret-secret-1234' },
+  ai: { profile: 'off', secretaryUrl: null, secretaryToken: '', callbackUrl: 'http://ccs.test', asrUrl: null, llm: null },
 };
 
 export interface Harness {
@@ -49,7 +51,7 @@ export interface Harness {
  * Стенд: поддельный Synapse в памяти, сервис контекста и песочница РИС/ЛИС на случайном порту.
  * ЛИС — подключение уровня 2 (с обратными вызовами), РИС — уровня 1 (только события).
  */
-export async function setup(opts: { stepMs?: number; pushCases?: boolean } = {}): Promise<Harness> {
+export async function setup(opts: { stepMs?: number; pushCases?: boolean; ai?: Partial<Config['ai']>; llm?: LlmClient | null } = {}): Promise<Harness> {
   const matrix = new FakeMatrix(mx('ccs'), SERVER);
   for (const u of ['smirnova', 'ershova', 'kolesnikov', 'gusev', 'outsider', 'orlov', 'belova', 'petrov']) matrix.tokens.set(`tok-${u}`, mx(u));
 
@@ -86,7 +88,8 @@ export async function setup(opts: { stepMs?: number; pushCases?: boolean } = {})
       { id: 'ris', kind: 'RIS', org: 'clinic', title: 'РИС', token_sha256: sha256(TOKENS.ris) },
     ],
   });
-  const service = createService(testConfig, { matrix, connectors, logger: false, log: silent });
+  const config: Config = { ...testConfig, ai: { ...testConfig.ai, ...opts.ai } };
+  const service = createService(config, { matrix, connectors, logger: false, log: silent, llm: opts.llm ?? null });
   app = service.app;
   if (opts.pushCases ?? true) await mock.pushCases();
 

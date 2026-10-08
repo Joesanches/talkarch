@@ -1,0 +1,16 @@
+[project]
+name = "konsilium-secretary"
+version = "0.1.0"
+description = "ИИ-«Секретарь»: стенограмма звонка LiveKit по дорожкам участников (распознавание речи в контуре)"
+requires-python = ">=3.11"
+dependencies = [
+  "livekit==1.1.19",     # Apache-2.0 — клиент LiveKit (WebRTC)
+  "aiohttp==3.14.3",     # Apache-2.0 / MIT — HTTP API агента и обратные вызовы
+  "websockets==17.1",    # BSD-3-Clause — потоковое распознавание (Vosk)
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

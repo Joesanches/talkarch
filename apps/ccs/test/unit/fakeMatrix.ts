@@ -41,6 +41,15 @@ export class FakeMatrix implements MatrixApi {
     return `${type}\u0000${stateKey}`;
   }
 
+  /** Канонический JSON Matrix: в событиях только целые числа (Synapse отвечает 400 M_BAD_JSON). */
+  private checkCanonical(content: unknown) {
+    const walk = (v: unknown): void => {
+      if (typeof v === 'number' && !Number.isInteger(v)) throw new MatrixError(400, 'M_BAD_JSON', 'Bad JSON value: float');
+      if (v && typeof v === 'object') for (const x of Object.values(v)) walk(x);
+    };
+    walk(content);
+  }
+
   /** Правила настоящего сервера, на которых уже спотыкались (см. интеграционный тест). */
   private checkStateKey(type: string, stateKey: string) {
     if (type !== 'm.room.member' && stateKey.startsWith('@') && stateKey !== this.botUserId) {
@@ -102,6 +111,7 @@ export class FakeMatrix implements MatrixApi {
   async sendState(roomId: string, type: string, stateKey: string, content: Record<string, unknown>) {
     this.maybeFail();
     this.checkStateKey(type, stateKey);
+    this.checkCanonical(content);
     const delay = this.stateDelay(type, content);
     if (delay) await new Promise((r) => setTimeout(r, delay));
     this.room(roomId).state.set(this.key(type, stateKey), content);
@@ -110,6 +120,7 @@ export class FakeMatrix implements MatrixApi {
 
   async sendEvent(roomId: string, type: string, content: Record<string, unknown>, txnId?: string) {
     this.maybeFail();
+    this.checkCanonical(content);
     const room = this.room(roomId);
     const dup = txnId ? room.events.find((e) => e.txnId === txnId) : undefined;
     if (dup) return dup.eventId;

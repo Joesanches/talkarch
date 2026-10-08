@@ -9,3 +9,6 @@ infra/.data
 deploy/stand/.env
 deploy/stand/generated
 **/*.log
+**/.venv
+**/__pycache__
+**/.pytest_cache

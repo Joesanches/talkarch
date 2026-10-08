@@ -17,7 +17,7 @@ export interface CallTokenResult {
 export class CallTokenService {
   constructor(
     private readonly matrix: MatrixApi,
-    private readonly opts: { url: string; apiKey: string; apiSecret: string; roomSecret: string; ttl?: string },
+    private readonly opts: { url: string; apiKey: string; apiSecret: string; roomSecret: string; ttl?: string; internalUrl?: string },
   ) {}
 
   livekitRoomName(roomId: string, callId: string): string {
@@ -40,5 +40,16 @@ export class CallTokenService {
     const at = new AccessToken(this.opts.apiKey, this.opts.apiSecret, { identity: userId, name, ttl: this.opts.ttl ?? '10m' });
     at.addGrant({ roomJoin: true, room, canPublish: true, canSubscribe: true, canPublishData: true });
     return { url: this.opts.url, token: await at.toJwt(), room };
+  }
+
+  /**
+   * Токен ИИ-агента («Секретарь»): только слушает — без права публиковать. Адрес LiveKit — внутренний,
+   * если агент работает в той же сети, что и LiveKit.
+   */
+  async agentToken(roomId: string, callId: string, identity: string, name: string): Promise<CallTokenResult> {
+    const room = this.livekitRoomName(roomId, callId);
+    const at = new AccessToken(this.opts.apiKey, this.opts.apiSecret, { identity, name, ttl: '6h' });
+    at.addGrant({ roomJoin: true, room, canPublish: false, canSubscribe: true, canPublishData: false });
+    return { url: this.opts.internalUrl ?? this.opts.url, token: await at.toJwt(), room };
   }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EventType, MsgType, RoomType } from '@konsilium/protocol';
-import { avatarColor, caseCode, foldersOf, formatDay, initials, preview, requestViews, type TimelineItem } from './model.ts';
+import { avatarColor, caseCode, foldersOf, formatDay, initials, offsetLabel, preview, reportDecisions, requestViews, type TimelineItem } from './model.ts';
 
 const item = (eventId: string, type: string, content: Record<string, unknown>, sender = '@smirnova:konsilium.test'): TimelineItem => ({
   eventId,
@@ -92,5 +92,26 @@ describe('reactionSummaries', () => {
       { key: 'принято', label: 'Принято', count: 2, mine: '$4' },
       { key: 'вопрос', label: 'Вопрос', count: 1, mine: null },
     ]);
+  });
+});
+
+describe('reportDecisions', () => {
+  it('первое решение по черновику действует, ссылки без m.reference и чужие статусы игнорируются', () => {
+    const ref = (id: string) => ({ 'm.relates_to': { rel_type: 'm.reference', event_id: id } });
+    const items = [
+      { ...item('$a1', EventType.ReportStatus, { ...ref('$draft'), status: 'accepted' }), ts: 10 },
+      item('$a2', EventType.ReportStatus, { ...ref('$draft'), status: 'rejected' }, '@kolesnikov:konsilium.test'),
+      item('$bad', EventType.ReportStatus, { 'm.relates_to': { event_id: '$other' }, status: 'accepted' }),
+      item('$odd', EventType.ReportStatus, { ...ref('$other'), status: 'maybe' }),
+    ];
+    const d = reportDecisions(items);
+    expect(d.get('$draft')).toEqual({ status: 'accepted', sender: '@smirnova:konsilium.test', ts: 10 });
+    expect(d.has('$other')).toBe(false);
+    expect(preview(items[0], 'Смирнова', true)).toBe('Черновик протокола принят');
+  });
+
+  it('смещение от начала звонка', () => {
+    expect(offsetLabel(0)).toBe('0:00');
+    expect(offsetLabel(245.7)).toBe('4:05');
   });
 });

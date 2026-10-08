@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react';
 import { Direction, EventStatus, type MatrixClient, type MatrixEvent, type Room } from 'matrix-js-sdk';
-import { EventType, MsgType, RoomType, parseStructured, type CaseContext, type CaseRolesContent, type KeyImage } from '@konsilium/protocol';
+import { EventType, MsgType, RoomType, parseStructured, type CaseContext, type CaseRolesContent, type KeyImage, type TranscriptSegment } from '@konsilium/protocol';
 import type { LinkOpen } from '@konsilium/embed/protocol';
 import {
   ageLabel,
@@ -9,6 +9,7 @@ import {
   formatTime,
   membershipKind,
   reactionSummaries,
+  reportDecisions,
   REACTIONS,
   membershipText,
   type MembershipKind,
@@ -27,6 +28,7 @@ import { activeCall, formatDuration } from '../call.ts';
 import { config } from '../config.ts';
 import { toItem } from '../matrix.ts';
 import { useAuthedMedia } from '../media.ts';
+import { ProtocolDraftCard, TranscriptCard } from './AiCards.tsx';
 import { RoomAvatar } from './ChatList.tsx';
 import { RequestForm } from './RequestForm.tsx';
 import { Icon } from './Icon.tsx';
@@ -332,6 +334,16 @@ export function ChatView({
   const items = events.map(toItem);
   const requests = requestViews(items);
   const reactions = reactionSummaries(items, me);
+  const decisions = reportDecisions(items);
+  // Стенограммы и черновики публикует только сервис (создатель комнаты): такие же сообщения от участников — обычный текст.
+  const service = room.getCreator();
+  const fromService = (e: { sender: string }) => !!service && e.sender === service;
+  const transcripts = new Map<string, Map<number, TranscriptSegment>>();
+  for (const e of items) {
+    if (e.type !== 'm.room.message' || e.content.msgtype !== MsgType.Transcript || !fromService(e)) continue;
+    const t = parseStructured(e.content);
+    if (t?.msgtype === MsgType.Transcript) transcripts.set(e.eventId, new Map(t[MsgType.Transcript].segments.map((s) => [s.i, s])));
+  }
   const react = (eventId: string, key: string) => {
     const mine = reactions.get(eventId)?.find((r) => r.key === key)?.mine;
     if (mine) void client.redactEvent(room.roomId, mine).catch(() => undefined);
@@ -427,11 +439,16 @@ export function ChatView({
     const role = roles[e.sender]?.role;
     const pending = events[i]?.status === EventStatus.SENDING || events[i]?.status === EventStatus.QUEUED;
     const request = e.content.msgtype === MsgType.Request ? requests.get(e.eventId) : undefined;
-    const structured = e.content.msgtype === MsgType.KeyImage ? parseStructured(e.content) : null;
+    const structured =
+      e.content.msgtype === MsgType.KeyImage || ((e.content.msgtype === MsgType.Transcript || e.content.msgtype === MsgType.Report) && fromService(e))
+        ? parseStructured(e.content)
+        : null;
     const keyImage = structured?.msgtype === MsgType.KeyImage ? structured : null;
+    const transcript = structured?.msgtype === MsgType.Transcript ? structured : null;
+    const draft = structured?.msgtype === MsgType.Report && structured[MsgType.Report].kind === 'consilium_protocol' ? structured : null;
     rows.push(
       <div key={e.eventId} className={`msg ${mine ? 'out' : 'in'}${first ? ' first' : ''}`}>
-        <div className="bubble">
+        <div className={`bubble${transcript || draft ? ' wide' : ''}`}>
           {!mine && first && (
             <div className="sender">
               {name(e.sender)}
@@ -442,6 +459,19 @@ export function ChatView({
             <RequestCard view={request} />
           ) : keyImage ? (
             <KeyImageCard client={client} msg={keyImage} onOpenLink={onOpenLink} />
+          ) : transcript ? (
+            <TranscriptCard msg={transcript} />
+          ) : draft ? (
+            <ProtocolDraftCard
+              client={client}
+              roomId={room.roomId}
+              eventId={e.eventId}
+              msg={draft}
+              segments={transcripts.get(draft[MsgType.Report].transcript_event_id ?? '') ?? new Map()}
+              decision={decisions.get(e.eventId)}
+              canDecide={joined}
+              name={name}
+            />
           ) : (
             <div className="text">{String(e.content.body ?? '')}</div>
           )}
@@ -495,6 +525,7 @@ export function ChatView({
           <span className="callbar-dot" />
           <span>
             Идёт звонок · начат {formatTime(Date.parse(call.started_at))}, {name(call.started_by)}
+            {call.transcription && ' · ведётся стенограмма (ИИ)'}
           </span>
           <button className="primary" onClick={() => onCall(false)}>
             Присоединиться

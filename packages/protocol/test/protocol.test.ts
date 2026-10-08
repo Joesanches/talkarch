@@ -49,6 +49,40 @@ describe('parseStructured', () => {
     }
   });
 
+  it('стенограмма: время фрагментов — целые миллисекунды (в событиях Matrix дробные числа запрещены)', () => {
+    const transcript = (start_ms: number) => ({
+      msgtype: MsgType.Transcript,
+      body: 'Стенограмма',
+      [MsgType.Transcript]: {
+        call_id: 'main',
+        started_at: '2026-10-08T07:05:00Z',
+        ended_at: '2026-10-08T07:17:00Z',
+        segments: [{ i: 0, speaker: '@a:x', name: 'А', start_ms, end_ms: 9000, text: 'текст' }],
+        asr: { engine: 'vosk', profile: 'cpu' },
+      },
+    });
+    const ok = parseStructured(transcript(6500));
+    expect(ok?.msgtype === MsgType.Transcript && ok[MsgType.Transcript].truncated).toBe(false);
+    expect(parseStructured(transcript(6.5))).toBeNull();
+  });
+
+  it('черновик протокола: разделы по умолчанию пустые, случай может отсутствовать', () => {
+    const msg = parseStructured({
+      msgtype: MsgType.Report,
+      body: 'ЧЕРНОВИК',
+      [MsgType.Report]: {
+        kind: 'consilium_protocol',
+        status: 'draft',
+        generated_by: 'template',
+        meeting: { date: '08.10.2026', start: '10:05', end: '10:17', form: 'remote' },
+        participants: [],
+        case: null,
+        sections: { decision: [{ text: 'Контроль через 3 месяца', refs: [2] }] },
+      },
+    });
+    expect(msg?.msgtype === MsgType.Report && msg[MsgType.Report].sections.purpose).toEqual([]);
+  });
+
   it('возвращает null для обычного текста и для битых данных', () => {
     expect(parseStructured({ msgtype: 'm.text', body: 'привет' })).toBeNull();
     expect(parseStructured({ msgtype: MsgType.Request, body: 'x', [MsgType.Request]: { kind: 'unknown' } })).toBeNull();

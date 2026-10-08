@@ -19,6 +19,19 @@ const devEnv = {
   LIVEKIT_API_KEY: 'devkey',
   LIVEKIT_API_SECRET: 'secret',
   STEP_MS: '400',
+  // ИИ-«Секретарь» из профиля ai (infra/docker-compose.yml): агент в Docker, сервис контекста — на хосте.
+  ...(process.env.E2E_AI
+    ? {
+        SECRETARY_URL: 'http://localhost:8070',
+        SECRETARY_TOKEN: 'dev-only-secretary-token-0123456789',
+        AI_PROFILE: 'cpu',
+        ASR_URL: 'ws://vosk:2700',
+        LIVEKIT_INTERNAL_URL: 'ws://livekit:7880',
+        CCS_CALLBACK_URL: 'http://host.docker.internal:8080',
+        LLM_URL: 'http://localhost:12434/engines/v1',
+        LLM_MODEL: 'ai/qwen3:1.7b-q4_K_M',
+      }
+    : {}),
 } as Record<string, string>;
 
 // Браузер окружения (Chromium из /opt/pw-browsers), если версия Playwright не совпадает с установленной.
@@ -32,6 +45,8 @@ export default defineConfig({
   globalSetup: './e2e/global-setup.ts',
   use: {
     baseURL: 'http://localhost:5173',
+    // Элемент, перекрытый другим (например, развёрнутым звонком), — ошибка через 20 с, а не ожидание до конца теста.
+    actionTimeout: 20_000,
     locale: 'ru-RU',
     viewport: { width: 1360, height: 860 },
     // Тестовые камера и микрофон Chromium — для сквозного теста звонков.
