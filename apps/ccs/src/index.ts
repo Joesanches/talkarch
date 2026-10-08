@@ -1,12 +1,13 @@
 import { resolve } from 'node:path';
 import { buildApp } from './app.ts';
+import { ArchiveService, InMemoryArchiveStore } from './archive.ts';
 import { CallTokenService } from './calls.ts';
 import { CaseDirectory, InMemoryCaseRegistry } from './cases.ts';
 import { CaseRoomService, InMemoryCaseRoomStore } from './caseRooms.ts';
 import { loadConfig, type Config } from './config.ts';
 import { ConnectorRegistry, UserResolver, type Connector } from './connectors.ts';
 import { CriticalService, InMemoryCriticalStore } from './critical.ts';
-import { createPool, ensureDatabase, migrate, PgCaseRegistry, PgCaseRoomStore, PgCriticalStore, PgProcessedEvents, PgRequestStore } from './db.ts';
+import { createPool, ensureDatabase, migrate, PgArchiveStore, PgCaseRegistry, PgCaseRoomStore, PgCriticalStore, PgProcessedEvents, PgRequestStore } from './db.ts';
 import { EventProcessor, type Logger } from './events.ts';
 import { HttpHostCallbacks, type HostCallbacks } from './host.ts';
 import { InMemoryProcessedEvents, IntegrationService } from './integration.ts';
@@ -40,6 +41,14 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
   const roomStore = pool ? new PgCaseRoomStore(pool) : new InMemoryCaseRoomStore();
   const processed = pool ? new PgProcessedEvents(pool) : new InMemoryProcessedEvents();
   const criticalStore = pool ? new PgCriticalStore(pool) : new InMemoryCriticalStore();
+  const archive = new ArchiveService({
+    matrix,
+    store: pool ? new PgArchiveStore(pool) : new InMemoryArchiveStore(),
+    log,
+    ...config.archive,
+    hasPendingCritical: (roomId) => criticalStore.pendingInRoom(roomId),
+    ...(opts.now ? { now: opts.now } : {}),
+  });
   const callbacks = new Map<string, HostCallbacks>();
   const callbacksFor = (c: Connector) => {
     if (!c.callbacks) return null;
@@ -47,7 +56,7 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
     return callbacks.get(c.id)!;
   };
   const directory = new CaseDirectory({ registry, connectors, users, callbacksFor });
-  const caseRooms = new CaseRoomService(matrix, roomStore, { aliasSecret: config.aliasSecret, serverName: config.serverName });
+  const caseRooms = new CaseRoomService(matrix, roomStore, { aliasSecret: config.aliasSecret, serverName: config.serverName, archive });
   const critical = new CriticalService({ matrix, store: criticalStore, directory, caseRooms, connectors, users, log, ...(opts.now ? { now: opts.now } : {}) });
   const calls = new CallTokenService(matrix, { ...config.livekit, roomSecret: config.aliasSecret });
   const secretary = new SecretaryService({
@@ -71,10 +80,11 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
     registry,
     caseRooms,
     calls,
-    events: new EventProcessor({ matrix, directory, requests, users, critical, log }),
+    events: new EventProcessor({ matrix, directory, requests, users, critical, archive, log }),
     integration: new IntegrationService({ matrix, directory, registry, caseRooms, requests, processed, critical, log }),
     secretary,
     critical,
+    archive,
     logger: opts.logger ?? true,
   });
   if (pool && config.databaseUrl) {
@@ -100,6 +110,11 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
     app.addHook('onReady', async () => critical.start(config.criticalTickMs));
     app.addHook('onClose', async () => critical.stop());
   }
+  // Архив чатов случаев: проход по таймеру (0 — не запускать; тесты вызывают tick сами).
+  if (config.archive.tickMs > 0) {
+    app.addHook('onReady', async () => archive.start(config.archive.tickMs));
+    app.addHook('onClose', async () => archive.stop());
+  }
   // Имя сервиса в лентах чатов вместо технического «ccs». Ошибка не мешает запуску.
   if (matrix instanceof HttpMatrixApi) {
     app.addHook('onReady', async () => {
@@ -113,7 +128,7 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
         .catch((err) => app.log.warn({ err }, 'Ping Application Service не прошёл'));
     });
   }
-  return { app, matrix, connectors, registry, caseRooms, calls, directory, secretary, critical };
+  return { app, matrix, connectors, registry, caseRooms, calls, directory, secretary, critical, archive };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

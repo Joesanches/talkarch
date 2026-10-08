@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { NotificationCountType, SyncState, type MatrixClient, type Room } from 'matrix-js-sdk';
+import { NotificationCountType, RoomEvent, SyncState, type MatrixClient, type Room } from 'matrix-js-sdk';
+import type { ArchivedCase } from '@konsilium/protocol';
 import { FOLDERS, criticalWaitingFor, foldersOf, initials, avatarColor, type Folder } from '../model.ts';
-import { CcsError, directRoomIds, openCase, roomCriticals, startClient, useClientUpdates, useSyncState, type Session } from '../matrix.ts';
+import { CcsError, directRoomIds, openCase, removedToArchive, roomCriticals, startClient, useClientUpdates, useSyncState, type Session } from '../matrix.ts';
 import { focusRooms } from '../sync.ts';
+import { ArchiveList } from './ArchiveList.tsx';
 import { ChatList } from './ChatList.tsx';
 import { CallPanel } from './CallPanel.tsx';
 import { ChatView } from './ChatView.tsx';
@@ -74,12 +76,41 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
   // Открытый чат и чат идущего звонка — с полным состоянием и лентой (Sliding Sync).
   useEffect(() => focusRooms(client, [selected, call?.roomId]), [client, selected, call?.roomId]);
   const current = selected ? client.getRoom(selected) : null;
+  // Открытый чат перенесён в архив (сервис вывел участников) — закрываем его и подсказываем, где искать.
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  useEffect(() => {
+    const onMembership = (room: Room) => {
+      if (room.roomId !== selectedRef.current || !removedToArchive(room, session.userId)) return;
+      setSelected(null);
+      setBanner('Чат перенесён в архив — открыть его можно из папки «Архив»');
+    };
+    client.on(RoomEvent.MyMembership, onMembership);
+    return () => {
+      client.off(RoomEvent.MyMembership, onMembership);
+    };
+  }, [client, session.userId]);
   const me = client.getUser(session.userId);
   const myName = me?.displayName ?? session.userId;
 
   async function select(room: Room) {
     if (room.getMyMembership() === 'invite') await client.joinRoom(room.roomId).catch(() => undefined);
     setSelected(room.roomId);
+  }
+
+  /** Вернуться в архивный чат: сервис контекста проверяет права и приглашает, чат открывается только для чтения. */
+  async function openArchived(c: ArchivedCase) {
+    const room = client.getRoom(c.room_id);
+    if (room?.getMyMembership() === 'join') return setSelected(room.roomId);
+    setBanner(`Открываем архивный случай ${c.case_id}…`);
+    try {
+      const r = await openCase(session, { connector: c.connector, caseId: c.case_id });
+      if (r.membership !== 'join') await client.joinRoom(r.roomId);
+      setSelected(r.roomId);
+      setBanner(null);
+    } catch (e) {
+      setBanner(e instanceof CcsError && e.status === 403 ? 'Нет доступа к случаю в системе-источнике' : `Не удалось открыть случай: ${(e as Error).message}`);
+    }
   }
 
   return (
@@ -106,14 +137,18 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
           <span>Выйти</span>
         </button>
       </nav>
-      <ChatList
-        client={client}
-        rooms={rooms.filter((r) => folderOf(r).includes(folder))}
-        selected={selected}
-        onSelect={select}
-        loading={!ready}
-        emptyHint={folder === 'cases' ? 'Чаты случаев появятся, когда вы откроете случай в РИС или ЛИС' : 'Здесь пока пусто'}
-      />
+      {folder === 'archive' ? (
+        <ArchiveList session={session} selected={selected} onOpen={(c) => void openArchived(c)} />
+      ) : (
+        <ChatList
+          client={client}
+          rooms={rooms.filter((r) => folderOf(r).includes(folder))}
+          selected={selected}
+          onSelect={select}
+          loading={!ready}
+          emptyHint={folder === 'cases' ? 'Чаты случаев появятся, когда вы откроете случай в РИС или ЛИС' : 'Здесь пока пусто'}
+        />
+      )}
       <section className="chat">
         {call && client.getRoom(call.roomId) && (
           <CallPanel
@@ -142,6 +177,7 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
             client={client}
             room={current}
             onBack={() => setSelected(null)}
+            onClosed={() => setSelected(null)}
             inCall={call?.roomId === current.roomId}
             onCall={(video) => {
               setCall({ roomId: current.roomId, video });

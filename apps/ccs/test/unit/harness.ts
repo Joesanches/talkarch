@@ -32,6 +32,7 @@ export const testConfig: Config = {
   chatWebUrl: 'https://chat.clinic.local',
   livekit: { url: 'ws://lk', apiKey: 'devkey', apiSecret: 'secret-secret-secret-secret-1234' },
   criticalTickMs: 0,
+  archive: { afterMs: 14 * 86_400_000, returnMs: 24 * 3_600_000, tickMs: 0 },
   ai: { profile: 'off', secretaryUrl: null, secretaryToken: '', callbackUrl: 'http://ccs.test', asrUrl: null, llm: null },
 };
 

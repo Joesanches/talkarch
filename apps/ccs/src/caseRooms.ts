@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { CaseContext, EventType, RoomType, caseKey, type CaseRef, type CaseRolesContent, type SourceSystem } from '@konsilium/protocol';
+import type { ArchiveService } from './archive.ts';
 import type { HostCase } from './cases.ts';
 import { MatrixError, type MatrixApi, type Membership, type StateEventInit } from './matrix.ts';
 
@@ -46,7 +47,7 @@ export class CaseRoomService {
   constructor(
     private readonly matrix: MatrixApi,
     private readonly store: CaseRoomStore,
-    private readonly opts: { aliasSecret: string; serverName: string; now?: () => Date },
+    private readonly opts: { aliasSecret: string; serverName: string; now?: () => Date; archive?: ArchiveService },
   ) {}
 
   /** Служебный псевдоним: HMAC от ключа случая, чтобы номер исследования не был виден в псевдониме. */
@@ -85,12 +86,14 @@ export class CaseRoomService {
     if (existing) {
       await this.repairIfIncomplete(existing, hostCase);
       await this.store.set(key, existing);
+      await this.opts.archive?.track(existing, hostCase);
       return { roomId: existing, alias, created: false };
     }
 
     try {
       const roomId = await this.matrix.createRoom(this.buildCreateRequest(hostCase, localpart));
       await this.store.set(key, roomId);
+      await this.opts.archive?.track(roomId, hostCase);
       return { roomId, alias, created: true };
     } catch (e) {
       // Гонка между экземплярами сервиса: псевдоним уже занят — значит, комнату создал другой экземпляр.
@@ -118,6 +121,8 @@ export class CaseRoomService {
   /**
    * Привести существующую комнату к новому снимку случая: контекст, название, роли, новые участники,
    * отзыв доступа, сообщение о закрытии. Устаревший снимок (версия не больше записанной в комнате) пропускается.
+   * Архивный чат: участников не приглашаем (вернуться можно по требованию); случай снова открыт — чат возвращается
+   * из архива.
    */
   sync(roomId: string, hostCase: HostCase): Promise<SyncResult> {
     const prev = this.syncQueue.get(roomId) ?? Promise.resolve();
@@ -135,6 +140,20 @@ export class CaseRoomService {
     const current = await this.matrix.getState<CaseContext>(roomId, EventType.CaseContext);
     if (current && current.sync.version >= hostCase.snapshot.version) return result;
 
+    const status = hostCase.snapshot.status;
+    const archive = this.opts.archive;
+    let archived = archive ? await archive.isArchived(roomId) : false;
+    if (archived && status === 'open') {
+      await archive!.restore(roomId);
+      archived = false;
+      await this.matrix.sendEvent(
+        roomId,
+        'm.room.message',
+        { msgtype: 'm.notice', body: `Случай снова открыт в ${systemLabel[hostCase.source]} — чат вернулся из архива` },
+        `restore.${roomId}.${hostCase.snapshot.version}`,
+      );
+    }
+
     const next = this.buildContext(hostCase);
     await this.matrix.sendState(roomId, EventType.CaseContext, '', next);
     if (!current || current.title !== next.title) {
@@ -144,7 +163,7 @@ export class CaseRoomService {
     await this.matrix.sendState(roomId, EventType.CaseRoles, '', this.buildRoles(hostCase, roles));
     result.updated = true;
 
-    for (const p of hostCase.participants) {
+    for (const p of archived ? [] : hostCase.participants) {
       const m = await this.matrix.getMembership(roomId, p.userId);
       if (m === 'join' || m === 'invite') continue;
       if (m === 'ban') {
@@ -154,6 +173,7 @@ export class CaseRoomService {
       await this.matrix.invite(roomId, p.userId, 'Участник случая в системе-источнике');
       result.invited.push(p.userId);
     }
+    await archive?.revoke(roomId, hostCase.revoked);
     for (const userId of hostCase.revoked) {
       const m = await this.matrix.getMembership(roomId, userId);
       if (m === 'join' || m === 'invite') {
@@ -162,7 +182,6 @@ export class CaseRoomService {
       }
     }
 
-    const status = hostCase.snapshot.status;
     if ((current?.status ?? 'open') !== status && status !== 'open') {
       const what = status === 'closed' ? 'закрыт' : 'отменён';
       await this.matrix.sendEvent(
@@ -172,6 +191,7 @@ export class CaseRoomService {
         `status.${roomId}.${hostCase.snapshot.version}`,
       );
     }
+    await archive?.track(roomId, hostCase);
     return result;
   }
 

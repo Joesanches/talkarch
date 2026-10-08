@@ -56,5 +56,7 @@ room_prejoin_state:
     - ru.vendor.case.context
     # Статусы критических находок: приглашённый эскалацией сразу видит в списке, что его ждёт находка.
     - ru.vendor.critical.status
+    # Архив: вернувшийся в архивный чат видит в приглашении, что чат только для чтения.
+    - ru.vendor.case.archive
 
 __OIDC_YAML__

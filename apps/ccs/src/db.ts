@@ -4,6 +4,7 @@
  */
 import pg from 'pg';
 import { caseKey, type CaseRef } from '@konsilium/protocol';
+import type { ArchiveStore, ArchivedRoom, CaseInfo } from './archive.ts';
 import type { CaseRegistry, HostCase } from './cases.ts';
 import type { CaseRoomStore } from './caseRooms.ts';
 import type { CriticalFinding, CriticalStore, Escalation } from './critical.ts';
@@ -65,6 +66,30 @@ const MIGRATIONS: string[] = [
    create unique index critical_findings_host on critical_findings (connector, host_finding_id) where host_finding_id is not null;
    create index critical_findings_due on critical_findings (next_at) where status = 'pending' and next_at is not null;
    create index critical_findings_connector on critical_findings (connector, raised_at);`,
+  // Архив чатов случаев: состояние случая и активность по комнатам, выведенные участники и их возвраты.
+  `create table case_lifecycle (
+     room_id text primary key,
+     case_key text not null,
+     connector text not null,
+     case_id text not null,
+     title text not null,
+     source text not null,
+     -- Номер и название в нижнем регистре для поиска в папке «Архив»: база с ctype C не сравнивает кириллицу без учёта регистра.
+     search text not null,
+     closed_at timestamptz,
+     last_activity_at timestamptz not null,
+     archived_at timestamptz
+   );
+   create index case_lifecycle_due on case_lifecycle (closed_at) where closed_at is not null and archived_at is null;
+   create table case_archive_members (
+     room_id text not null references case_lifecycle (room_id) on delete cascade,
+     user_id text not null,
+     returned_at timestamptz,
+     primary key (room_id, user_id)
+   );
+   create index case_archive_members_user on case_archive_members (user_id);
+   create index case_archive_members_returned on case_archive_members (returned_at) where returned_at is not null;
+   create index critical_findings_room_pending on critical_findings (room_id) where status = 'pending';`,
 ];
 
 export function createPool(url: string): pg.Pool {
@@ -324,5 +349,121 @@ export class PgCriticalStore implements CriticalStore {
   async list(connector: string, since: number): Promise<CriticalFinding[]> {
     const r = await this.pool.query<CriticalRow>('select * from critical_findings where connector = $1 and raised_at >= $2 order by raised_at', [connector, ts(since)]);
     return r.rows.map(toFinding);
+  }
+
+  async pendingInRoom(roomId: string): Promise<boolean> {
+    const r = await this.pool.query(`select 1 from critical_findings where room_id = $1 and status = 'pending' limit 1`, [roomId]);
+    return (r.rowCount ?? 0) > 0;
+  }
+}
+
+export class PgArchiveStore implements ArchiveStore {
+  constructor(private readonly pool: pg.Pool) {}
+
+  async track(roomId: string, info: CaseInfo, closed: boolean, at: number): Promise<void> {
+    await this.pool.query(
+      `insert into case_lifecycle (room_id, case_key, connector, case_id, title, source, search, closed_at, last_activity_at)
+       values ($1, $2, $3, $4, $5, $6, $7, case when $8 then $9::timestamptz end, $9)
+       on conflict (room_id) do update set case_key = excluded.case_key, connector = excluded.connector, case_id = excluded.case_id,
+         title = excluded.title, source = excluded.source, search = excluded.search,
+         closed_at = case when $8 then coalesce(case_lifecycle.closed_at, $9) end`,
+      [roomId, info.caseKey, info.connector, info.caseId, info.title, info.source, `${info.caseId}\n${info.title}`.toLowerCase(), closed, ts(at)],
+    );
+  }
+
+  async touch(roomId: string, at: number): Promise<void> {
+    await this.pool.query('update case_lifecycle set last_activity_at = greatest(last_activity_at, $2) where room_id = $1 and archived_at is null', [roomId, ts(at)]);
+  }
+
+  async claimDue(idleBefore: number, at: number, limit: number): Promise<string[]> {
+    const r = await this.pool.query<{ room_id: string }>(
+      `update case_lifecycle set archived_at = $2 where room_id in (
+         select room_id from case_lifecycle
+         where closed_at is not null and archived_at is null and greatest(closed_at, last_activity_at) < $1
+         order by closed_at limit $3 for update skip locked
+       ) returning room_id`,
+      [ts(idleBefore), ts(at), limit],
+    );
+    return r.rows.map((x) => x.room_id);
+  }
+
+  async release(roomId: string): Promise<void> {
+    await this.pool.query('update case_lifecycle set archived_at = null where room_id = $1', [roomId]);
+  }
+
+  async addMembers(roomId: string, userIds: string[]): Promise<void> {
+    if (!userIds.length) return;
+    await this.pool.query(
+      'insert into case_archive_members (room_id, user_id) select $1, unnest($2::text[]) on conflict do nothing',
+      [roomId, userIds],
+    );
+  }
+
+  async isArchived(roomId: string): Promise<boolean> {
+    const r = await this.pool.query('select 1 from case_lifecycle where room_id = $1 and archived_at is not null', [roomId]);
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  async restore(roomId: string): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      await client.query('update case_lifecycle set archived_at = null where room_id = $1', [roomId]);
+      await client.query('delete from case_archive_members where room_id = $1', [roomId]);
+      await client.query('commit');
+    } catch (e) {
+      await client.query('rollback').catch(() => undefined);
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  async wasMember(roomId: string, userId: string): Promise<boolean> {
+    const r = await this.pool.query('select 1 from case_archive_members where room_id = $1 and user_id = $2', [roomId, userId]);
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  async dropMembers(roomId: string, userIds: string[]): Promise<void> {
+    await this.pool.query('delete from case_archive_members where room_id = $1 and user_id = any($2::text[])', [roomId, userIds]);
+  }
+
+  async markReturned(roomId: string, userId: string, at: number): Promise<void> {
+    await this.pool.query(
+      `insert into case_archive_members (room_id, user_id, returned_at) values ($1, $2, $3)
+       on conflict (room_id, user_id) do update set returned_at = excluded.returned_at`,
+      [roomId, userId, ts(at)],
+    );
+  }
+
+  async claimReturns(before: number, limit: number): Promise<Array<{ roomId: string; userId: string }>> {
+    const r = await this.pool.query<{ room_id: string; user_id: string }>(
+      `update case_archive_members set returned_at = null where (room_id, user_id) in (
+         select room_id, user_id from case_archive_members where returned_at < $1 order by returned_at limit $2 for update skip locked
+       ) returning room_id, user_id`,
+      [ts(before), limit],
+    );
+    return r.rows.map((x) => ({ roomId: x.room_id, userId: x.user_id }));
+  }
+
+  async forUser(userId: string, opts: { q?: string; limit: number }): Promise<ArchivedRoom[]> {
+    const q = opts.q?.trim();
+    const r = await this.pool.query<{ room_id: string; case_key: string; connector: string; case_id: string; title: string; source: CaseInfo['source']; archived_at: Date }>(
+      `select l.room_id, l.case_key, l.connector, l.case_id, l.title, l.source, l.archived_at
+       from case_archive_members m join case_lifecycle l on l.room_id = m.room_id
+       where m.user_id = $1 and l.archived_at is not null
+         and ($2::text is null or l.search like $2)
+       order by l.archived_at desc limit $3`,
+      [userId, q ? `%${q.toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null, opts.limit],
+    );
+    return r.rows.map((x) => ({
+      roomId: x.room_id,
+      caseKey: x.case_key,
+      connector: x.connector,
+      caseId: x.case_id,
+      title: x.title,
+      source: x.source,
+      archivedAt: x.archived_at.getTime(),
+    }));
   }
 }

@@ -30,6 +30,8 @@ export interface MatrixApi {
   invite(roomId: string, userId: string, reason?: string): Promise<void>;
   kick(roomId: string, userId: string, reason?: string): Promise<void>;
   getMembership(roomId: string, userId: string): Promise<Membership | null>;
+  /** Состав комнаты глазами сервиса: все, у кого есть членство (вошли, приглашены, вышли…). */
+  members(roomId: string): Promise<Array<{ userId: string; membership: Membership }>>;
   getState<T = Record<string, unknown>>(roomId: string, type: string, stateKey?: string): Promise<T | null>;
   sendState(roomId: string, type: string, stateKey: string, content: Record<string, unknown>): Promise<string>;
   sendEvent(roomId: string, type: string, content: Record<string, unknown>, txnId?: string): Promise<string>;
@@ -102,6 +104,11 @@ export class HttpMatrixApi implements MatrixApi {
   async getMembership(roomId: string, userId: string): Promise<Membership | null> {
     const m = await this.getState<{ membership?: Membership }>(roomId, 'm.room.member', userId);
     return m?.membership ?? null;
+  }
+
+  async members(roomId: string): Promise<Array<{ userId: string; membership: Membership }>> {
+    const r = await this.call<{ chunk: Array<{ state_key: string; content: { membership?: Membership } }> }>('GET', `/rooms/${enc(roomId)}/members`);
+    return r.chunk.flatMap((e) => (e.content.membership ? [{ userId: e.state_key, membership: e.content.membership }] : []));
   }
 
   async getState<T>(roomId: string, type: string, stateKey = ''): Promise<T | null> {

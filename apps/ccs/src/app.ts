@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import type { ArchiveService } from './archive.ts';
 import type { CallTokenService } from './calls.ts';
 import type { CaseDirectory, CaseRegistry } from './cases.ts';
 import type { CaseRoomService } from './caseRooms.ts';
@@ -28,6 +29,7 @@ export interface AppDeps {
   integration: IntegrationService;
   secretary: SecretaryService;
   critical: CriticalService;
+  archive: ArchiveService;
   logger?: boolean;
 }
 

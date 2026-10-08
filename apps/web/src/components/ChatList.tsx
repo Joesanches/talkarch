@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { NotificationCountType, type MatrixClient, type Room } from 'matrix-js-sdk';
 import { EventType, RoomType } from '@konsilium/protocol';
 import { avatarColor, caseCode, criticalWaitingFor, formatListTime, initials, parseCaseContext, preview, priorityLabel } from '../model.ts';
-import { roomCriticals, toItem } from '../matrix.ts';
+import { roomArchived, roomCriticals, toItem } from '../matrix.ts';
 import { Icon } from './Icon.tsx';
 
 const kindColor: Record<string, string> = { LIS: 'var(--color-kind-pathology)', RIS: 'var(--color-kind-radiology)', TMK: 'var(--color-kind-consilium)' };
@@ -88,7 +88,7 @@ export function ChatList(props: {
                       !
                     </b>
                   )}
-                  {prio && <span className={`chip ${ctx?.priority}`}>{prio}</span>}
+                  {roomArchived(room) ? <span className="chip archived">Архив</span> : prio && <span className={`chip ${ctx?.priority}`}>{prio}</span>}
                   {(unread > 0 || invite) && <b className="badge">{invite ? 'новый' : unread}</b>}
                 </div>
               </div>

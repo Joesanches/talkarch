@@ -82,6 +82,7 @@ const membership = async (token: string, roomId: string, userId: string) =>
 
 describe('Чат случая на Synapse с песочницей РИС/ЛИС', () => {
   let app: FastifyInstance;
+  let svc: ReturnType<typeof createService>;
   let mock: HostMock;
   const tok: Record<string, string> = {};
   let roomId = '';
@@ -109,6 +110,9 @@ describe('Чат случая на Synapse с песочницей РИС/ЛИС
       LIVEKIT_API_KEY: 'devkey',
       LIVEKIT_API_SECRET: 'secret',
       CRITICAL_TICK_MS: '300',
+      // Архив: закрытый случай уходит в архив на первом же проходе; проход тест вызывает сам.
+      ARCHIVE_AFTER_DAYS: '0',
+      ARCHIVE_TICK_MS: '0',
     });
     mock = createHostMock({
       ccsUrl: CCS,
@@ -122,7 +126,8 @@ describe('Чат случая на Synapse с песочницей РИС/ЛИС
     // и заявки из прошлых прогонов должны найти ЛИС.
     await mock.app.listen({ host: '127.0.0.1', port: MOCK_PORT });
     serviceConfig = config;
-    app = createService(config, { logger: false, log: { info() {}, warn() {}, error: console.error } }).app;
+    svc = createService(config, { logger: false, log: { info() {}, warn() {}, error: console.error } });
+    app = svc.app;
     await app.listen({ host: config.host, port: config.port });
   });
 
@@ -297,7 +302,8 @@ describe('Чат случая на Synapse с песочницей РИС/ЛИС
 
   it('после перезапуска сервиса статус старой заявки доходит до чата (хранилище в PostgreSQL)', async () => {
     await app.close();
-    app = createService(serviceConfig, { logger: false, log: { info() {}, warn() {}, error: console.error } }).app;
+    svc = createService(serviceConfig, { logger: false, log: { info() {}, warn() {}, error: console.error } });
+    app = svc.app;
     await app.listen({ host: serviceConfig.host, port: serviceConfig.port });
     const res = await mock.setRequestStatus('lis', ihcExternalId, 'rejected', 'Блок 1А исчерпан — нужен повторный забор');
     expect(res.body.results[0]).toMatchObject({ status: 'accepted' });
@@ -322,5 +328,58 @@ describe('Чат случая на Synapse с песочницей РИС/ЛИС
     expect(payload.video).toMatchObject({ roomJoin: true, room: ok.json.room });
     expect((await api(tok.ershova!, '/api/v1/calls/token', { roomId })).status).toBe(403); // приглашена, но не вошла
     expect((await api(tok.outsider!, '/api/v1/calls/token', { roomId })).status).toBe(403);
+  });
+
+  it('архив: закрытый случай — только чтение, участники выведены и после /forget пропадают из Sliding Sync; возврат с полной историей', async () => {
+    const AS = 'dev-only-as-token-0123456789abcdef';
+    const CASE = 'A26-118736';
+    const opened = await api(tok.orlov!, '/api/v1/cases/open', { connector: 'ris', caseId: CASE });
+    const archRoom = opened.json.roomId as string;
+    for (const u of ['orlov', 'melnikova']) expect((await cs(tok[u]!, 'POST', `/rooms/${enc(archRoom)}/join`, {})).status).toBe(200);
+    await cs(tok.orlov!, 'PUT', `/rooms/${enc(archRoom)}/send/m.room.message/arch-1`, { msgtype: 'm.text', body: 'Описание готово, заключение в РИС' });
+
+    await mock.updateCase('ris', CASE, { status: 'closed' });
+    expect(await svc.archive.tick()).toEqual({ archived: 1, removed: 0 });
+    for (const u of ['orlov', 'melnikova']) expect(await membership(AS, archRoom, `@${u}:konsilium.test`)).toBe('leave');
+    expect((await cs(AS, 'GET', `/rooms/${enc(archRoom)}/state/${EventType.CaseArchive}/`)).json).toMatchObject({ status: 'archived' });
+
+    // Sliding Sync отдаёт комнату, из которой вывели, пока пользователь её не «забудет» — это делает клиент.
+    const sss = async (token: string) =>
+      (
+        await fetch(`${HS}/_matrix/client/unstable/org.matrix.simplified_msc3575/sync?timeout=0`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ lists: { all: { ranges: [[0, 199]], timeline_limit: 1, required_state: [[EventType.CaseArchive, '']] } } }),
+        }).then((r) => r.json() as Promise<any>)
+      ).rooms as Record<string, { required_state?: Array<{ type: string; content: { status?: string } }> }>;
+    const before = (await sss(tok.melnikova!))[archRoom];
+    expect(before?.required_state?.find((e) => e.type === EventType.CaseArchive)?.content.status).toBe('archived');
+    expect((await cs(tok.melnikova!, 'POST', `/rooms/${enc(archRoom)}/forget`, {})).status).toBe(200);
+    expect(Object.keys(await sss(tok.melnikova!))).not.toContain(archRoom);
+
+    // Папка «Архив» — у обоих участников.
+    const list = await fetch(`${CCS}/api/v1/archive?q=${enc(CASE)}`, { headers: { authorization: `Bearer ${tok.melnikova}` } }).then((r) => r.json() as Promise<any>);
+    expect(list.cases).toEqual([expect.objectContaining({ room_id: archRoom, case_id: CASE, source: 'RIS' })]);
+
+    // Возврат: открыть случай → войти → история целиком. Цель — ≤ 1 с.
+    const t0 = performance.now();
+    const back = await api(tok.melnikova!, '/api/v1/cases/open', { connector: 'ris', caseId: CASE });
+    expect(back.json).toMatchObject({ roomId: archRoom, archived: true, membership: 'invite' });
+    expect((await cs(tok.melnikova!, 'POST', `/rooms/${enc(archRoom)}/join`, {})).status).toBe(200);
+    const history = await timeline(tok.melnikova!, archRoom);
+    const returnMs = performance.now() - t0;
+    console.log(`Возврат в архивный чат: ${Math.round(returnMs)} мс`);
+    expect(returnMs).toBeLessThan(2000);
+    expect(history.map((e) => e.content?.body)).toContain('Описание готово, заключение в РИС');
+
+    // Только чтение: ни сообщения, ни звонка.
+    const send = await cs(tok.melnikova!, 'PUT', `/rooms/${enc(archRoom)}/send/m.room.message/arch-2`, { msgtype: 'm.text', body: 'Вопрос' });
+    expect(send.status).toBe(403);
+    expect((await cs(tok.melnikova!, 'PUT', `/rooms/${enc(archRoom)}/state/${EventType.Call}/c1`, { kind: 'call' })).status).toBe(403);
+
+    // Случай снова открыт в РИС — писать можно, участники приглашены.
+    await mock.updateCase('ris', CASE, { status: 'open' });
+    expect(await membership(AS, archRoom, '@orlov:konsilium.test')).toBe('invite');
+    expect((await cs(tok.melnikova!, 'PUT', `/rooms/${enc(archRoom)}/send/m.room.message/arch-3`, { msgtype: 'm.text', body: 'Нужен пересмотр' })).status).toBe(200);
   });
 });

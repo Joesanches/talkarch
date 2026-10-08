@@ -9,10 +9,10 @@ import {
   type MatrixEvent,
   type Room,
 } from 'matrix-js-sdk';
-import { EventType } from '@konsilium/protocol';
+import { ArchivedCase, EventType } from '@konsilium/protocol';
 import { config } from './config.ts';
 import { startSync } from './sync.ts';
-import { criticalStatuses, type TimelineItem } from './model.ts';
+import { criticalStatuses, isArchivedState, type TimelineItem } from './model.ts';
 
 export interface Session {
   baseUrl: string;
@@ -102,7 +102,44 @@ export function startClient(s: Session): MatrixClient {
   const client = createClient({ baseUrl: s.baseUrl, userId: s.userId, accessToken: s.accessToken, deviceId: s.deviceId });
   // Simplified Sliding Sync, если сервер его поддерживает (sync.ts); иначе — обычная синхронизация.
   void startSync(client).catch((err) => console.error('Синхронизация не запустилась', err));
+  client.on(ClientEvent.Sync, () => forgetArchived(client));
   return client;
+}
+
+/** Чат случая в архиве: только чтение. Состояние пишет только сервис контекста (уровень 100). */
+export const roomArchived = (room: Room) => isArchivedState(room.currentState.getStateEvents(EventType.CaseArchive, '')?.getContent());
+
+/** Сервис вывел пользователя из архивного чата (а не он вышел сам). */
+export function removedToArchive(room: Room, me: string | null): boolean {
+  if (room.getMyMembership() !== 'leave' || !roomArchived(room)) return false;
+  const by = room.currentState.getStateEvents('m.room.member', me ?? '')?.getSender();
+  return !!by && by !== me;
+}
+
+const forgetting = new WeakMap<MatrixClient, Set<string>>();
+
+/**
+ * Забыть архивные чаты, из которых сервис вывел пользователя. Иначе Sliding Sync продолжает отдавать их в списке
+ * (выведенный — не то же, что вышедший сам), и у врача за годы копятся тысячи комнат. Вернуться можно из папки «Архив».
+ *
+ * Комната остаётся в памяти клиента (список показывает только join и invite): если её удалить, matrix-js-sdk
+ * отбросит следующее приглашение в неё — сервер пришлёт его не как «первые данные» комнаты.
+ */
+export function forgetArchived(client: MatrixClient) {
+  const me = client.getUserId();
+  const done = forgetting.get(client) ?? new Set<string>();
+  forgetting.set(client, done);
+  for (const room of client.getRooms()) {
+    if (done.has(room.roomId) || !removedToArchive(room, me)) continue;
+    done.add(room.roomId);
+    void client.forget(room.roomId, false).catch(() => done.delete(room.roomId));
+  }
+}
+
+/** Убрать вернувшийся архивный чат из списка: выйти и забыть (история остаётся в архиве). */
+export async function closeArchived(client: MatrixClient, roomId: string) {
+  await client.leave(roomId);
+  await client.forget(roomId, false);
 }
 
 /**
@@ -176,15 +213,28 @@ export class CcsError extends Error {
 export async function openCase(
   s: Session,
   ctx: { connector?: string; system?: string; caseId: string },
-): Promise<{ roomId: string; membership: string; connector: string; caseId: string }> {
+): Promise<{ roomId: string; membership: string; connector: string; caseId: string; archived: boolean }> {
   const res = await fetch(`${config.ccsUrl}/api/v1/cases/open`, {
     method: 'POST',
     headers: { authorization: `Bearer ${s.accessToken}`, 'content-type': 'application/json' },
     body: JSON.stringify(ctx.connector ? { connector: ctx.connector, caseId: ctx.caseId } : { system: ctx.system, caseId: ctx.caseId }),
   });
-  const json = (await res.json().catch(() => ({}))) as { roomId?: string; membership?: string; connector?: string; caseId?: string; error?: string };
+  const json = (await res.json().catch(() => ({}))) as { roomId?: string; membership?: string; connector?: string; caseId?: string; archived?: boolean; error?: string };
   if (!res.ok) throw new CcsError(res.status, json.error ?? `Сервис контекста ответил ${res.status}`);
-  return { roomId: json.roomId!, membership: json.membership!, connector: json.connector!, caseId: json.caseId! };
+  return { roomId: json.roomId!, membership: json.membership!, connector: json.connector!, caseId: json.caseId!, archived: json.archived ?? false };
+}
+
+/** Папка «Архив»: архивные случаи, в чатах которых пользователь участвовал (по данным сервиса контекста). */
+export async function fetchArchive(s: Session, q: string, signal?: AbortSignal): Promise<ArchivedCase[]> {
+  const url = new URL(`${config.ccsUrl}/api/v1/archive`);
+  if (q.trim()) url.searchParams.set('q', q.trim());
+  const res = await fetch(url, { headers: { authorization: `Bearer ${s.accessToken}` }, cache: 'no-store', ...(signal ? { signal } : {}) });
+  const json = (await res.json().catch(() => ({}))) as { cases?: unknown[]; error?: string };
+  if (!res.ok) throw new CcsError(res.status, json.error ?? `Сервис контекста ответил ${res.status}`);
+  return (json.cases ?? []).flatMap((c) => {
+    const r = ArchivedCase.safeParse(c);
+    return r.success ? [r.data] : [];
+  });
 }
 
 /** Сессия по токену, который передал хост (режим встраивания auth: token). */

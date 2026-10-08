@@ -1,0 +1,306 @@
+{
+  "run": "mv030bqk",
+  "started_at": "2026-10-08T22:01:56.588Z",
+  "params": {
+    "USERS": 60,
+    "ROOMS_PER_USER": 5,
+    "CREATE_RATE": 2,
+    "BURST": 20,
+    "BURST_RATE": 5,
+    "HEAVY": 1,
+    "HEAVY_ROOMS": 20,
+    "EVENTS": 100,
+    "MSG_RATES": [
+      2
+    ],
+    "STEP_S": 10,
+    "SYNC_MODE": "sliding",
+    "ARCHIVE_ROOMS": 40
+  },
+  "users": {
+    "registration": {
+      "n": 61,
+      "errors": 0,
+      "p50": 378,
+      "p95": 449,
+      "p99": 466,
+      "max": 466,
+      "mean": 385
+    }
+  },
+  "A1_case_snapshots": {
+    "batch_of_100": {
+      "n": 2,
+      "errors": 0,
+      "p50": 76,
+      "p95": 430,
+      "p99": 430,
+      "max": 430,
+      "mean": 253
+    },
+    "events_per_s": 237
+  },
+  "A2_chat_creation_paced": {
+    "rate_per_s": 2,
+    "duration_s": 50,
+    "all": {
+      "n": 100,
+      "errors": 0,
+      "p50": 773,
+      "p95": 1855,
+      "p99": 1891,
+      "max": 2546,
+      "mean": 899
+    },
+    "first_10pct": {
+      "n": 10,
+      "errors": 0,
+      "p50": 891,
+      "p95": 1050,
+      "p99": 1050,
+      "max": 1050,
+      "mean": 910
+    },
+    "last_10pct": {
+      "n": 10,
+      "errors": 0,
+      "p50": 743,
+      "p95": 871,
+      "p99": 871,
+      "max": 871,
+      "mean": 779
+    },
+    "ccs_cpu_pct": 4,
+    "containers_mid": {
+      "synapse": "13.31% · 127.7MiB",
+      "postgres": "0.71% · 131.7MiB"
+    }
+  },
+  "A3_chat_creation_peak": {
+    "offered_rate_per_s": 5,
+    "achieved_rooms_per_s": 3,
+    "offered_s": 7,
+    "all": {
+      "n": 20,
+      "errors": 0,
+      "p50": 2669,
+      "p95": 3445,
+      "p99": 3645,
+      "max": 3645,
+      "mean": 2640
+    },
+    "first_10pct": {
+      "n": 2,
+      "errors": 0,
+      "p50": 1068,
+      "p95": 1414,
+      "p99": 1414,
+      "max": 1414,
+      "mean": 1241
+    },
+    "last_10pct": {
+      "n": 2,
+      "errors": 0,
+      "p50": 2685,
+      "p95": 2698,
+      "p99": 2698,
+      "max": 2698,
+      "mean": 2692
+    },
+    "containers_mid": {
+      "synapse": "118.34% · 137.9MiB",
+      "postgres": "47.58% · 136.9MiB"
+    }
+  },
+  "joins": {
+    "n": 380,
+    "errors": 0,
+    "p50": 757,
+    "p95": 1270,
+    "p99": 1427,
+    "max": 1609,
+    "mean": 761
+  },
+  "B1_notifications": {
+    "batch_of_50": {
+      "n": 2,
+      "errors": 0,
+      "p50": 1601,
+      "p95": 1678,
+      "p99": 1678,
+      "max": 1678,
+      "mean": 1640
+    },
+    "events_per_s": 30
+  },
+  "B2_case_updates": {
+    "batch_of_50": {
+      "n": 2,
+      "errors": 0,
+      "p50": 3337,
+      "p95": 3484,
+      "p99": 3484,
+      "max": 3484,
+      "mean": 3410
+    },
+    "events_per_s": 15
+  },
+  "C0_send_without_clients": {
+    "rate_per_s": 2,
+    "send": {
+      "n": 20,
+      "errors": 0,
+      "p50": 64,
+      "p95": 75,
+      "p99": 79,
+      "max": 79,
+      "mean": 65
+    }
+  },
+  "D1_cold_start_regular": {
+    "rooms_per_user": 5,
+    "one_by_one": {
+      "n": 20,
+      "errors": 0,
+      "p50": 75,
+      "p95": 92,
+      "p99": 99,
+      "max": 99,
+      "mean": 73
+    },
+    "all_at_once": {
+      "n": 60,
+      "errors": 0,
+      "p50": 1825,
+      "p95": 2219,
+      "p99": 2231,
+      "max": 2231,
+      "mean": 1573
+    }
+  },
+  "C_message_delivery": {
+    "clients": 60,
+    "steps": [
+      {
+        "rate_per_s": 2,
+        "duration_s": 10,
+        "send": {
+          "n": 20,
+          "errors": 0,
+          "p50": 69,
+          "p95": 214,
+          "p99": 236,
+          "max": 236,
+          "mean": 98
+        },
+        "delivery": {
+          "n": 40,
+          "errors": 0,
+          "p50": 96,
+          "p95": 300,
+          "p99": 312,
+          "max": 312,
+          "mean": 134
+        },
+        "delivered_pct": 100,
+        "ccs_cpu_pct": 0,
+        "containers_mid": {
+          "synapse": "4.61% · 157.9MiB",
+          "postgres": "3.30% · 156.1MiB"
+        }
+      }
+    ]
+  },
+  "D2_cold_start_heavy": {
+    "rooms_per_user": 20,
+    "initial_sync_first": {
+      "n": 1,
+      "errors": 0,
+      "p50": 497,
+      "p95": 497,
+      "p99": 497,
+      "max": 497,
+      "mean": 497
+    },
+    "initial_sync_repeat_cached": {
+      "n": 2,
+      "errors": 0,
+      "p50": 17,
+      "p95": 18,
+      "p99": 18,
+      "max": 18,
+      "mean": 18
+    },
+    "sliding_sync_first_20": {
+      "n": 3,
+      "errors": 0,
+      "p50": 79,
+      "p95": 88,
+      "p99": 88,
+      "max": 88,
+      "mean": 79
+    }
+  },
+  "E1_archive": {
+    "rooms": 40,
+    "archived": 40,
+    "duration_s": 21.4,
+    "rooms_per_s": 1.9
+  },
+  "E2_archive_return": {
+    "one_by_one": {
+      "n": 20,
+      "errors": 0,
+      "p50": 347,
+      "p95": 400,
+      "p99": 456,
+      "max": 456,
+      "mean": 353
+    },
+    "all_at_once": {
+      "n": 20,
+      "errors": 0,
+      "p50": 1723,
+      "p95": 2162,
+      "p99": 2178,
+      "max": 2178,
+      "mean": 1750
+    },
+    "all_at_once_phases": {
+      "open_ccs": {
+        "n": 20,
+        "errors": 0,
+        "p50": 637,
+        "p95": 1427,
+        "p99": 1499,
+        "max": 1499,
+        "mean": 859
+      },
+      "join": {
+        "n": 20,
+        "errors": 0,
+        "p50": 667,
+        "p95": 797,
+        "p99": 841,
+        "max": 841,
+        "mean": 650
+      },
+      "history": {
+        "n": 20,
+        "errors": 0,
+        "p50": 222,
+        "p95": 339,
+        "p99": 346,
+        "max": 346,
+        "mean": 240
+      }
+    }
+  },
+  "database": {
+    "synapse_db": "36 MB",
+    "rooms": "120",
+    "events": "2614",
+    "users": "61"
+  },
+  "finished_at": "2026-10-08T22:04:29.401Z"
+}

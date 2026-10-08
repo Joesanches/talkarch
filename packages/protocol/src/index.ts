@@ -34,6 +34,11 @@ export const EventType = {
    * (уровень 100): адресаты, срок, эскалации, кто и когда подтвердил. Клиенты верят ему, а не сырым `ru.vendor.ack`.
    */
   CriticalStatus: `${NS}.critical.status`,
+  /**
+   * Архив чата случая — state-событие (state_key = ""). Пишет только сервис контекста: случай закрыт и давно без
+   * активности → комната только для чтения, участники выведены, история сохранена (docs/03-architecture.md, 3.4).
+   */
+  CaseArchive: `${NS}.case.archive`,
   Call: `${NS}.call`,
   CallInvite: `${NS}.call.invite`,
 } as const;
@@ -160,6 +165,25 @@ export const CaseRolesContent = z.object({
   members: z.record(z.string().startsWith('@'), CaseRoleAssignment),
 });
 export type CaseRolesContent = z.infer<typeof CaseRolesContent>;
+
+/** `ru.vendor.case.archive`: в архиве (только чтение) или снова активен (случай открыт заново в системе-источнике). */
+export const CaseArchiveContent = z.object({
+  status: z.enum(['archived', 'active']),
+  archived_at: z.string().datetime({ offset: true }).optional(),
+  restored_at: z.string().datetime({ offset: true }).optional(),
+});
+export type CaseArchiveContent = z.infer<typeof CaseArchiveContent>;
+
+/** Архивный случай пользователя в папке «Архив»: `GET /api/v1/archive` сервиса контекста. */
+export const ArchivedCase = z.object({
+  room_id: z.string().startsWith('!'),
+  connector: ConnectorId,
+  case_id: z.string().min(1),
+  title: z.string(),
+  source: SourceSystem,
+  archived_at: z.string().datetime({ offset: true }),
+});
+export type ArchivedCase = z.infer<typeof ArchivedCase>;
 
 const MessageBase = z.object({ body: z.string().min(1) });
 

@@ -79,6 +79,8 @@ export interface CriticalStore {
   /** Подтвердить, если ещё не подтверждена (атомарно). `null` — уже подтверждена или нет такой. */
   acknowledge(eventId: string, by: string, at: number): Promise<CriticalFinding | null>;
   list(connector: string, since: number): Promise<CriticalFinding[]>;
+  /** Есть ли в комнате неподтверждённая находка (такой чат не уходит в архив). */
+  pendingInRoom(roomId: string): Promise<boolean>;
 }
 
 export class InMemoryCriticalStore implements CriticalStore {
@@ -126,6 +128,9 @@ export class InMemoryCriticalStore implements CriticalStore {
   }
   async list(connector: string, since: number) {
     return [...this.items.values()].filter((f) => f.connector === connector && f.raisedAt >= since).map((f) => structuredClone(f));
+  }
+  async pendingInRoom(roomId: string) {
+    return [...this.items.values()].some((f) => f.roomId === roomId && f.status === 'pending');
   }
 }
 

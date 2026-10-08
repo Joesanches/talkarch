@@ -428,6 +428,19 @@ button:disabled {
 .chip.closed {
   background: var(--color-neutral-border);
 }
+.chip.archived {
+  background: var(--color-neutral-surface-muted);
+  color: var(--color-neutral-text-secondary);
+  border: 1px solid var(--color-neutral-border);
+}
+/* Архивный чат: вместо поля ввода — пометка «только чтение». */
+.archived-bar {
+  align-items: center;
+  color: var(--color-neutral-text-secondary);
+}
+.archived-bar span {
+  flex: 1;
+}
 
 .timeline {
   flex: 1;

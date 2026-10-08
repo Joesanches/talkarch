@@ -2,6 +2,7 @@
  * Чистые функции модели клиента: папки, карточки заявок, подписи. Без React и matrix-js-sdk — их легко тестировать.
  */
 import {
+  CaseArchiveContent,
   CaseContext,
   CaseRole,
   CriticalStatusContent,
@@ -13,7 +14,7 @@ import {
   type RequestStep,
 } from '@konsilium/protocol';
 
-export type Folder = 'all' | 'cases' | 'direct' | 'channels' | 'service';
+export type Folder = 'all' | 'cases' | 'direct' | 'channels' | 'service' | 'archive';
 
 export const FOLDERS: ReadonlyArray<{ id: Folder; label: string }> = [
   { id: 'all', label: 'Все' },
@@ -21,9 +22,11 @@ export const FOLDERS: ReadonlyArray<{ id: Folder; label: string }> = [
   { id: 'direct', label: 'Личные' },
   { id: 'channels', label: 'Каналы' },
   { id: 'service', label: 'Сервис' },
+  // Строится не по комнатам синхронизации, а по данным сервиса контекста: из архивных чатов участники выведены.
+  { id: 'archive', label: 'Архив' },
 ];
 
-/** Папки, в которые попадает комната. «Все» — всегда. */
+/** Папки, в которые попадает комната. «Все» — всегда; «Архив» — список сервиса контекста, не комнаты. */
 export function foldersOf(room: { roomType?: string; isDirect: boolean }): Folder[] {
   const out: Folder[] = ['all'];
   if (room.roomType === RoomType.Case) out.push('cases');
@@ -116,6 +119,15 @@ export function parseCaseContext(raw: unknown): CaseContext | null {
   const r = CaseContext.safeParse(raw);
   return r.success ? r.data : null;
 }
+
+/** Чат случая в архиве (state `ru.vendor.case.archive` от сервиса): только чтение. */
+export function isArchivedState(raw: unknown): boolean {
+  const r = CaseArchiveContent.safeParse(raw);
+  return r.success && r.data.status === 'archived';
+}
+
+/** «в архиве с 8 окт.» */
+export const archivedLabel = (iso: string) => `в архиве с ${short.format(new Date(iso))}`;
 
 export function parseNotification(content: Record<string, unknown>): NotificationInfo | null {
   const r = NotificationInfo.safeParse(content[NotificationField]);

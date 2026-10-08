@@ -28,7 +28,7 @@ import {
 } from '../model.ts';
 import { activeCall, formatDuration } from '../call.ts';
 import { config } from '../config.ts';
-import { roomCriticals, toItem } from '../matrix.ts';
+import { closeArchived, roomArchived, roomCriticals, toItem } from '../matrix.ts';
 import { useAuthedMedia } from '../media.ts';
 import { ProtocolDraftCard, TranscriptCard } from './AiCards.tsx';
 import { CriticalBar, CriticalCard, CriticalForm } from './Critical.tsx';
@@ -109,7 +109,7 @@ function PatientReveal({ client, roomId }: { client: MatrixClient; roomId: strin
   );
 }
 
-function CaseBar({ ctx, onOpenLink, client, roomId }: { ctx: CaseContext; onOpenLink: OpenLink; client: MatrixClient; roomId: string }) {
+function CaseBar({ ctx, onOpenLink, client, roomId, archived }: { ctx: CaseContext; onOpenLink: OpenLink; client: MatrixClient; roomId: string; archived: boolean }) {
   const patient = [ctx.patient.masked, ctx.patient.sex ? sexLabel[ctx.patient.sex] : null, ctx.patient.age !== undefined ? ageLabel(ctx.patient.age) : null]
     .filter(Boolean)
     .join(', ');
@@ -132,6 +132,7 @@ function CaseBar({ ctx, onOpenLink, client, roomId }: { ctx: CaseContext; onOpen
       </div>
       <div className="casebar-side">
         {ctx.status && ctx.status !== 'open' && <span className="chip closed">{ctx.status === 'closed' ? 'Закрыт' : 'Отменён'}</span>}
+        {archived && <span className="chip archived">Архив</span>}
         {prio && <span className={`chip ${ctx.priority}`}>{prio}</span>}
         {ctx.links?.record && (
           <a
@@ -265,6 +266,32 @@ function Notice({ item }: { item: TimelineItem }) {
   );
 }
 
+/**
+ * Архивный чат вместо поля ввода: только чтение. «Убрать из списка» — выйти и забыть комнату; история остаётся
+ * в архиве, вернуться можно из папки «Архив» (иначе сервис сам выведет пользователя через сутки).
+ */
+function ArchivedBar({ client, room, onClosed, canClose }: { client: MatrixClient; room: Room; onClosed: () => void; canClose: boolean }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="composer archived-bar" role="status">
+      <Icon name="archive" size={18} />
+      <span>Случай в архиве — чат только для чтения</span>
+      {canClose && room.getMyMembership() === 'join' && (
+        <button
+          className="ghost"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            void closeArchived(client, room.roomId).then(onClosed, () => setBusy(false));
+          }}
+        >
+          Убрать из списка
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Composer({ client, room, requests, criticalRoles }: { client: MatrixClient; room: Room; requests: boolean; criticalRoles: Map<string, string[]> | null }) {
   const [text, setText] = useState('');
   const [form, setForm] = useState<'request' | 'critical' | null>(null);
@@ -325,6 +352,7 @@ export function ChatView({
   client,
   room,
   onBack,
+  onClosed = onBack,
   inCall,
   onCall,
   embedded = false,
@@ -333,6 +361,8 @@ export function ChatView({
   client: MatrixClient;
   room: Room;
   onBack: () => void;
+  /** Архивный чат убран из списка. */
+  onClosed?: () => void;
   /** Встроен в РИС/ЛИС: без кнопки «назад», ссылки отдаются хосту. */
   embedded?: boolean;
   onOpenLink?: OpenLink;
@@ -377,7 +407,10 @@ export function ChatView({
   })();
   const name = (userId: string) => room.getMember(userId)?.name ?? userId;
   const members = room.getJoinedMemberCount() + room.getInvitedMemberCount();
+  // Архивный чат — только чтение: ни сообщений, ни отметок, ни звонков (сервер тоже не примет).
+  const archived = roomArchived(room);
   const joined = room.getMyMembership() === 'join';
+  const writable = joined && !archived;
   const call = activeCall(room);
 
   // Прокрутка: держимся низа, если пользователь не листает историю.
@@ -498,7 +531,7 @@ export function ChatView({
               msg={draft}
               segments={transcripts.get(draft[MsgType.Report].transcript_event_id ?? '') ?? new Map()}
               decision={decisions.get(e.eventId)}
-              canDecide={joined}
+              canDecide={writable}
               name={name}
             />
           ) : (
@@ -508,14 +541,21 @@ export function ChatView({
           {(reactions.get(e.eventId)?.length ?? 0) > 0 && (
             <div className="reactions">
               {reactions.get(e.eventId)!.map((r) => (
-                <button key={r.key} className={`reaction ${r.key}${r.mine ? ' mine' : ''}`} onClick={() => react(e.eventId, r.key)} aria-pressed={!!r.mine} title={r.mine ? 'Снять отметку' : 'Отметить'}>
+                <button
+                  key={r.key}
+                  className={`reaction ${r.key}${r.mine ? ' mine' : ''}`}
+                  onClick={() => react(e.eventId, r.key)}
+                  disabled={!writable}
+                  aria-pressed={!!r.mine}
+                  title={r.mine ? 'Снять отметку' : 'Отметить'}
+                >
                   {r.label} <b>{r.count}</b>
                 </button>
               ))}
             </div>
           )}
         </div>
-        {!pending && joined && <ReactionPicker onPick={(key) => react(e.eventId, key)} />}
+        {!pending && writable && <ReactionPicker onPick={(key) => react(e.eventId, key)} />}
       </div>,
     );
   });
@@ -537,7 +577,7 @@ export function ChatView({
             {members} {members % 10 === 1 && members % 100 !== 11 ? 'участник' : members % 10 >= 2 && members % 10 <= 4 && (members % 100 < 12 || members % 100 > 14) ? 'участника' : 'участников'}
           </div>
         </div>
-        {joined && (
+        {writable && (
           <div className="chat-actions">
             <button className="icon-btn" onClick={() => onCall(false)} aria-label="Аудиозвонок" title="Аудиозвонок" disabled={inCall}>
               <Icon name="phone" />
@@ -548,9 +588,9 @@ export function ChatView({
           </div>
         )}
       </header>
-      {ctx && <CaseBar ctx={ctx} onOpenLink={onOpenLink} client={client} roomId={room.roomId} />}
-      {joined && <CriticalBar client={client} roomId={room.roomId} waiting={waiting} />}
-      {call && !inCall && joined && (
+      {ctx && <CaseBar ctx={ctx} onOpenLink={onOpenLink} client={client} roomId={room.roomId} archived={archived} />}
+      {writable && <CriticalBar client={client} roomId={room.roomId} waiting={waiting} />}
+      {call && !inCall && writable && (
         <div className="call-banner" role="status">
           <span className="callbar-dot" />
           <span>
@@ -577,7 +617,12 @@ export function ChatView({
         )}
         {rows}
       </div>
-      <Composer client={client} room={room} requests={ctx?.source === 'LIS'} criticalRoles={criticalRoles} />
+      {archived ? (
+        // Встроенный чат привязан к случаю РИС/ЛИС — убирать его из списка там незачем.
+        <ArchivedBar client={client} room={room} onClosed={onClosed} canClose={!embedded} />
+      ) : (
+        <Composer client={client} room={room} requests={ctx?.source === 'LIS'} criticalRoles={criticalRoles} />
+      )}
     </>
   );
 }

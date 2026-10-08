@@ -71,6 +71,7 @@ export class FakeMatrix implements MatrixApi {
     const state = new Map<string, Record<string, unknown>>();
     state.set(this.key('m.room.create', ''), { creator: this.botUserId, ...(req.creation_content ?? {}) });
     state.set(this.key('m.room.member', this.botUserId), { membership: 'join' });
+    if (req.power_level_content_override) state.set(this.key('m.room.power_levels', ''), structuredClone(req.power_level_content_override));
     for (const s of req.initial_state ?? []) state.set(this.key(s.type, s.state_key), s.content);
     for (const u of req.invite ?? []) state.set(this.key('m.room.member', u), { membership: 'invite' });
     this.rooms.set(id, { id, req, state, events: [] });
@@ -97,6 +98,12 @@ export class FakeMatrix implements MatrixApi {
   async getMembership(roomId: string, userId: string) {
     const m = this.room(roomId).state.get(this.key('m.room.member', userId));
     return (m?.membership as Membership | undefined) ?? null;
+  }
+
+  async members(roomId: string) {
+    return [...this.room(roomId).state.entries()]
+      .filter(([k]) => k.startsWith('m.room.member\u0000'))
+      .map(([k, v]) => ({ userId: k.split('\u0000')[1]!, membership: v.membership as Membership }));
   }
 
   /** Сообщения комнаты определённого типа (для проверок). */

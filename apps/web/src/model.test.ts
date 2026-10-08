@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EventType, MsgType, RoomType } from '@konsilium/protocol';
-import { avatarColor, caseCode, countdown, criticalStatuses, criticalWaitingFor, foldersOf, formatDay, initials, offsetLabel, preview, reportDecisions, requestViews, type TimelineItem } from './model.ts';
+import { FOLDERS, archivedLabel, avatarColor, caseCode, isArchivedState, countdown, criticalStatuses, criticalWaitingFor, foldersOf, formatDay, initials, offsetLabel, preview, reportDecisions, requestViews, type TimelineItem } from './model.ts';
 
 const item = (eventId: string, type: string, content: Record<string, unknown>, sender = '@smirnova:konsilium.test'): TimelineItem => ({
   eventId,
@@ -15,6 +15,21 @@ describe('foldersOf', () => {
     expect(foldersOf({ roomType: RoomType.Case, isDirect: false })).toEqual(['all', 'cases']);
     expect(foldersOf({ isDirect: true })).toEqual(['all', 'direct']);
     expect(foldersOf({ roomType: RoomType.Channel, isDirect: false })).toEqual(['all', 'channels']);
+  });
+
+  it('«Архив» — папка по данным сервиса контекста: комнаты синхронизации в неё не попадают', () => {
+    expect(FOLDERS.at(-1)).toEqual({ id: 'archive', label: 'Архив' });
+    expect(foldersOf({ roomType: RoomType.Case, isDirect: false })).not.toContain('archive');
+  });
+});
+
+describe('архив чата случая', () => {
+  it('только чтение — пока статус archived; после возврата из архива — снова активен', () => {
+    expect(isArchivedState({ status: 'archived', archived_at: '2026-10-08T10:00:00.000Z' })).toBe(true);
+    expect(isArchivedState({ status: 'active', archived_at: '2026-10-08T10:00:00.000Z', restored_at: '2026-10-09T10:00:00.000Z' })).toBe(false);
+    expect(isArchivedState(undefined)).toBe(false);
+    expect(isArchivedState({ status: 'чужое' })).toBe(false);
+    expect(archivedLabel('2026-10-08T10:00:00.000Z')).toMatch(/^в архиве с 8 окт/);
   });
 });
 

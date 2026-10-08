@@ -6,7 +6,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { HostCase } from '../../src/cases.ts';
 import type { CriticalFinding } from '../../src/critical.ts';
-import { PgCaseRegistry, PgCaseRoomStore, PgCriticalStore, PgProcessedEvents, PgRequestStore, createPool, ensureDatabase, migrate } from '../../src/db.ts';
+import { PgArchiveStore, PgCaseRegistry, PgCaseRoomStore, PgCriticalStore, PgProcessedEvents, PgRequestStore, createPool, ensureDatabase, migrate } from '../../src/db.ts';
 
 const ADMIN = process.env.IT_PG_URL ?? 'postgres://synapse:synapse-dev@localhost:55432/postgres';
 const DB = `ccs_it_db_${Date.now()}`;
@@ -37,7 +37,7 @@ describe('Хранилище сервиса контекста в PostgreSQL', (
   beforeAll(async () => {
     await ensureDatabase(url, silent);
     pool = createPool(url);
-    expect(await migrate(pool)).toBe(2);
+    expect(await migrate(pool)).toBe(3);
     expect(await migrate(pool)).toBe(0); // повторный запуск ничего не делает
   });
 
@@ -127,5 +127,49 @@ describe('Хранилище сервиса контекста в PostgreSQL', (
     expect(await store.recordEscalation('$crit1', { step: 2, at: due, action: 'notify', target: 'head', users: [] }, [], null)).toBe(false);
     const [listed] = await store.list('ris', t0);
     expect(listed).toMatchObject({ status: 'acknowledged', ackAt: due + 1000, nextAt: null });
+  });
+
+  it('архив: закрытые без активности, аренда при параллельных проходах, возвраты, поиск, возврат из архива', async () => {
+    const store = new PgArchiveStore(pool);
+    const t0 = Date.parse('2026-10-08T10:00:00Z');
+    const DAY = 86_400_000;
+    const info = (caseId: string, title: string) => ({ caseKey: `lis:${caseId}`, connector: 'lis', caseId, title, source: 'LIS' as const });
+    await store.track('!a:t', info('Г26-1', 'Биопсия желудка'), false, t0);
+    await store.track('!b:t', info('Г26-2', 'Биопсия кожи'), true, t0);
+    await store.track('!c:t', info('Г26-3', 'Резекция'), true, t0);
+    await store.track('!c:t', info('Г26-3', 'Резекция'), true, t0 + 5 * DAY); // повторный снимок закрытого: время закрытия прежнее
+    await store.touch('!b:t', t0 + 10 * DAY);
+    await store.touch('!b:t', t0 + 2 * DAY); // старое событие не отодвигает назад
+
+    // Два экземпляра сервиса — комната достаётся одному.
+    const claims = await Promise.all([store.claimDue(t0 + 7 * DAY, t0 + 21 * DAY, 10), store.claimDue(t0 + 7 * DAY, t0 + 21 * DAY, 10)]);
+    expect(claims.flat()).toEqual(['!c:t']);
+    expect(await store.isArchived('!c:t')).toBe(true);
+    expect(await store.claimDue(t0 + 30 * DAY, t0 + 30 * DAY, 10)).toEqual(['!b:t']);
+    await store.release('!b:t');
+    expect(await store.isArchived('!b:t')).toBe(false);
+
+    await store.addMembers('!c:t', ['@smirnova:t', '@ershova:t']);
+    await store.addMembers('!c:t', ['@smirnova:t']);
+    expect(await store.wasMember('!c:t', '@ershova:t')).toBe(true);
+    expect(await store.wasMember('!c:t', '@outsider:t')).toBe(false);
+    expect((await store.forUser('@smirnova:t', { limit: 10 })).map((r) => r.caseId)).toEqual(['Г26-3']);
+    expect(await store.forUser('@smirnova:t', { q: 'резек', limit: 10 })).toHaveLength(1);
+    expect(await store.forUser('@smirnova:t', { q: '100%', limit: 10 })).toHaveLength(0);
+
+    await store.markReturned('!c:t', '@ershova:t', t0 + 15 * DAY);
+    await store.markReturned('!c:t', '@gusev:t', t0 + 15 * DAY); // вернулся, не будучи в чате до архива
+    expect(await store.claimReturns(t0 + 15 * DAY, 10)).toEqual([]);
+    const back = await Promise.all([store.claimReturns(t0 + 16 * DAY, 10), store.claimReturns(t0 + 16 * DAY, 10)]);
+    expect(back.flat().map((r) => r.userId).sort()).toEqual(['@ershova:t', '@gusev:t']);
+    expect((await store.forUser('@gusev:t', { limit: 10 })).map((r) => r.roomId)).toEqual(['!c:t']);
+    await store.dropMembers('!c:t', ['@gusev:t']);
+    expect(await store.forUser('@gusev:t', { limit: 10 })).toEqual([]);
+
+    await store.restore('!c:t');
+    expect(await store.isArchived('!c:t')).toBe(false);
+    expect(await store.wasMember('!c:t', '@ershova:t')).toBe(false);
+    await store.track('!c:t', info('Г26-3', 'Резекция'), false, t0 + 20 * DAY);
+    expect(await store.claimDue(t0 + 100 * DAY, t0 + 100 * DAY, 10)).toEqual(['!b:t']); // открытый случай в архив не уходит
   });
 });

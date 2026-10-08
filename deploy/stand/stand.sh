@@ -30,7 +30,8 @@ NODE_IP=<адрес> — адрес для медиа звонков, если �
 EMBED_ORIGINS="https://ris.example.ru …" — страницы РИС/ЛИС, которым можно встраивать чат;
 SSO=off — без единого входа через Keycloak (по умолчанию он есть: +1 ГБ ОЗУ);
 AI=cpu — ИИ-«Секретарь» (стенограмма звонка и черновик протокола) на процессоре: +8 ГБ ОЗУ, +10 ГБ диска;
-LLM_URL=… LLM_MODEL=… — внешний OpenAI-совместимый ИИ-шлюз вместо LLM на стенде (с AI=cpu).
+LLM_URL=… LLM_MODEL=… — внешний OpenAI-совместимый ИИ-шлюз вместо LLM на стенде (с AI=cpu);
+ARCHIVE_AFTER_DAYS=0 — закрытые случаи уходят в архив в течение минуты (по умолчанию — через 14 дней без активности).
 USAGE
 }
 
@@ -39,7 +40,7 @@ render() { # render <шаблон> <файл>
   content=$(<"$src")
   for var in DOMAIN DOMAIN_RE PG_PASSWORD REG_SECRET MACAROON_SECRET FORM_SECRET AS_TOKEN HS_TOKEN ALIAS_SECRET \
     LIVEKIT_KEY LIVEKIT_SECRET LIVEKIT_IP LIS_TOKEN LIS_TOKEN_SHA RIS_TOKEN RIS_TOKEN_SHA TEAM_TOKEN_SHA \
-    LIS_CALLBACK_TOKEN DEMO_PASSWORD EMBED_ORIGINS_JSON AI_ENV OIDC_SECRET OIDC_YAML; do
+    LIS_CALLBACK_TOKEN DEMO_PASSWORD EMBED_ORIGINS_JSON AI_ENV OIDC_SECRET OIDC_YAML ARCHIVE_AFTER_DAYS; do
     content=${content//"__${var}__"/"${!var}"}
   done
   printf '%s\n' "$content" >"$dst"
@@ -50,7 +51,7 @@ cmd_init() {
   [[ -n $domain ]] || die "укажите домен: ./stand.sh init chat-test.example.ru admin@example.ru"
   # Заданное в командной строке (NODE_IP=… AI=cpu ./stand.sh init …) важнее сохранённого в .env.
   local overrides=() v
-  for v in TLS_MODE NODE_IP EMBED_ORIGINS AI SSO LLM_URL LLM_MODEL BUILD_CA_FILE; do
+  for v in TLS_MODE NODE_IP EMBED_ORIGINS AI SSO LLM_URL LLM_MODEL BUILD_CA_FILE ARCHIVE_AFTER_DAYS; do
     [[ -n ${!v+x} ]] && overrides+=("$v=${!v}")
   done
   if [[ -f $ENV_FILE ]]; then
@@ -91,6 +92,8 @@ cmd_init() {
   [[ $SSO == keycloak || $SSO == off ]] || die "SSO=keycloak или SSO=off"
   OIDC_SECRET=${OIDC_SECRET:-$(rand 48)}
   KC_ADMIN_PASSWORD=${KC_ADMIN_PASSWORD:-$(rand 20)}
+  ARCHIVE_AFTER_DAYS=${ARCHIVE_AFTER_DAYS:-14}
+  [[ $ARCHIVE_AFTER_DAYS =~ ^[0-9]+$ ]] || die "ARCHIVE_AFTER_DAYS — целое число дней"
   COMPOSE_PROFILES=
   if [[ $SSO == keycloak ]]; then COMPOSE_PROFILES=sso; fi
   if [[ $AI == cpu ]]; then COMPOSE_PROFILES=${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}ai; fi
@@ -133,6 +136,8 @@ SECRETARY_TOKEN=$SECRETARY_TOKEN
 LLM_URL=$LLM_URL
 LLM_MODEL=$LLM_MODEL
 LLM_SSL_CERT_FILE=$LLM_SSL_CERT_FILE
+# Архив: через сколько дней без активности закрытый случай уходит в архив (0 — сразу, для проверки).
+ARCHIVE_AFTER_DAYS=$ARCHIVE_AFTER_DAYS
 ENV
 
   DOMAIN_RE=${DOMAIN//./\\.}

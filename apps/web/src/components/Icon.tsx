@@ -5,6 +5,7 @@ const paths: Record<string, string> = {
   direct: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c1-4 4-6 8-6s7 2 8 6',
   channels: 'M4 10v4h3l6 4V6L7 10zM17 9a4 4 0 0 1 0 6',
   service: 'M14.5 6.5a4 4 0 0 0-5 5L4 17l3 3 5.5-5.5a4 4 0 0 0 5-5L15 12l-3-3z',
+  archive: 'M3 4h18v4H3zM5 8v12h14V8M10 12h4',
   send: 'M4 12l16-8-6 16-3-7z',
   search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',
   logout: 'M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10',

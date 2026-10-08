@@ -28,6 +28,8 @@ export const LIST_REQUIRED_STATE: string[][] = [
   ['m.room.name', ''],
   ['m.room.avatar', ''],
   [EventType.CaseContext, ''],
+  // Архив: вернувшийся видит пометку в списке; из выведенных комнат клиент выходит насовсем (forget).
+  [EventType.CaseArchive, ''],
   [EventType.CriticalStatus, '*'],
   [EventType.Call, '*'],
   ['m.room.member', '$ME'],

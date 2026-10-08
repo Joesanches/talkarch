@@ -9,7 +9,8 @@
  *   B. события интеграции в существующие чаты: уведомления и обновления случаев;
  *   C. доставка сообщений при сотнях клиентов синхронизации (long-poll /sync, как у веб-клиента) на нескольких частотах;
  *   D. холодный старт: первая синхронизация пользователя с 20 и с 200 комнатами (по одному и массовым переподключением);
- *      Simplified Sliding Sync, если доступен.
+ *      Simplified Sliding Sync, если доступен;
+ *   E. архив: закрытые случаи уходят в архив (участники выводятся), участники возвращаются в архивный чат по требованию.
  * Сервис контекста тест запускает сам — с отдельной базой и подключением `load` (уровень 1).
  */
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
@@ -39,6 +40,7 @@ const HEAVY_ROOMS = num('HEAVY_ROOMS', 200);
 const EVENTS = num('INTEGRATION_EVENTS', 1000);
 const MSG_RATES = (env.MSG_RATES ?? '2,10,30').split(',').map(Number);
 const STEP_S = num('STEP_S', 60);
+const ARCHIVE_ROOMS = num('ARCHIVE_ROOMS', 100);
 /** Как синхронизируются клиенты: `classic` — long-poll /sync, `sliding` — Simplified Sliding Sync, как веб-клиент. */
 const SYNC_MODE = env.SYNC_MODE === 'sliding' ? 'sliding' : 'classic';
 const RUN = env.RUN_ID ?? Date.now().toString(36);
@@ -48,7 +50,7 @@ const OUT = resolve(env.OUT ?? join(ROOT, 'tools/load/results', `load-${RUN}.jso
 const PASSWORD = 'dev-only-load-password-1';
 const LOAD_TOKEN = 'dev-only-load-token-0123456789abcdef';
 const hs = new Hs(HS_URL, env.SYNAPSE_REGISTRATION_SECRET ?? 'dev-only-registration-shared-secret');
-const results: Record<string, unknown> = { run: RUN, started_at: new Date().toISOString(), params: { USERS, ROOMS_PER_USER, CREATE_RATE, BURST, BURST_RATE, HEAVY, HEAVY_ROOMS, EVENTS, MSG_RATES, STEP_S, SYNC_MODE } };
+const results: Record<string, unknown> = { run: RUN, started_at: new Date().toISOString(), params: { USERS, ROOMS_PER_USER, CREATE_RATE, BURST, BURST_RATE, HEAVY, HEAVY_ROOMS, EVENTS, MSG_RATES, STEP_S, SYNC_MODE, ARCHIVE_ROOMS } };
 const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
 // ── Ресурсы ──────────────────────────────────────────────────────────────────
@@ -72,9 +74,9 @@ function cpuSeconds(pid: number): number {
   }
 }
 
-function psql(sql: string): string {
+function psql(sql: string, db = 'synapse'): string {
   try {
-    return execFileSync('docker', ['exec', PG_CONTAINER, 'psql', '-U', 'synapse', '-d', 'synapse', '-Atc', sql], { encoding: 'utf8' }).trim();
+    return execFileSync('docker', ['exec', PG_CONTAINER, 'psql', '-U', 'synapse', '-d', db, '-Atc', sql], { encoding: 'utf8' }).trim();
   } catch {
     return '?';
   }
@@ -109,6 +111,9 @@ async function startCcs(): Promise<ChildProcess> {
       CHAT_WEB_URL: 'http://localhost:5173',
       LIVEKIT_API_KEY: 'devkey',
       LIVEKIT_API_SECRET: 'secret',
+      // Сценарий E: закрытый случай уходит в архив на ближайшем проходе (раз в секунду).
+      ARCHIVE_AFTER_DAYS: '0',
+      ARCHIVE_TICK_MS: '1000',
     },
   });
   for (let i = 0; i < 60; i++) {
@@ -440,6 +445,69 @@ async function main() {
     initial_sync_first: coldHeavyFirst.summary(),
     initial_sync_repeat_cached: coldHeavy.summary(),
     sliding_sync_first_20: sssStatus === 200 ? sss.summary() : { unsupported: sssStatus },
+  };
+
+  // E. Архив: РИС/ЛИС закрывает случаи → сервис переводит чаты в архив и выводит участников; затем участники
+  // возвращаются в архивный чат по требованию (открыть случай → войти → история). Цель возврата — ≤ 1 с.
+  const archived = withChat.slice(0, Math.min(ARCHIVE_ROOMS, withChat.length));
+  log(`E1: ${archived.length} случаев закрыты — архив`);
+  const tE = performance.now();
+  for (let i = 0; i < archived.length; i += 50) {
+    const r = await integration(archived.slice(i, i + 50).map((c) => cloudEvent(`${c.caseId}:v3`, 'ru.vendor.case.upserted', { ...snapshot(c, 3, 'ihc'), status: 'closed' })));
+    if (r.http !== 200 || !r.statuses.every((x) => x === 'accepted')) log(`E1: закрытие — http ${r.http}, ${[...new Set(r.statuses)].join(',')}`);
+  }
+  const archivedCount = () => Number(psql(`select count(*) from case_lifecycle where archived_at is not null and case_id like 'L-${RUN}-%'`, 'ccs_load')) || 0;
+  let done = 0;
+  while ((done = archivedCount()) < archived.length && performance.now() - tE < 600_000) await sleep(1000);
+  const archiveS = (performance.now() - tE) / 1000;
+  results.E1_archive = { rooms: archived.length, archived: done, duration_s: Math.round(archiveS * 10) / 10, rooms_per_s: Math.round((done / archiveS) * 10) / 10 };
+
+  const phases = { open: new Recorder(), join: new Recorder(), history: new Recorder() };
+  const returnTo = async (c: CaseRoom, u: User, rec: Recorder, track = false) => {
+    const t0 = performance.now();
+    let t = t0;
+    const lap = (name: keyof typeof phases) => {
+      const now = performance.now();
+      if (track) phases[name].ok(now - t);
+      t = now;
+    };
+    try {
+      const open = await fetch(`${CCS_URL}/api/v1/cases/open`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${u.token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ connector: 'load', caseId: c.caseId }),
+      });
+      const j = (await open.json()) as { roomId?: string; archived?: boolean };
+      if (open.status !== 200 || !j.archived || !j.roomId) throw new Error(`open http ${open.status}`);
+      lap('open');
+      const joined = await hs.call('POST', `/_matrix/client/v3/join/${encodeURIComponent(j.roomId)}`, u.token, {});
+      if (joined.status !== 200) throw new Error(`join http ${joined.status}`);
+      lap('join');
+      // История на экране: как веб-клиент — подписка Sliding Sync на комнату (50 событий и всё состояние) или /messages.
+      const history =
+        SYNC_MODE === 'sliding'
+          ? await hs.call<any>('POST', '/_matrix/client/unstable/org.matrix.simplified_msc3575/sync?timeout=0', u.token, {
+              room_subscriptions: { [j.roomId]: { timeline_limit: 50, required_state: [['*', '*']] } },
+            })
+          : await hs.call<any>('GET', `/_matrix/client/v3/rooms/${encodeURIComponent(j.roomId)}/messages?dir=b&limit=50`, u.token);
+      const events: any[] = SYNC_MODE === 'sliding' ? (history.json.rooms?.[j.roomId]?.timeline ?? []) : (history.json.chunk ?? []);
+      if (history.status !== 200 || !events.some((e) => e.type === 'm.room.message')) throw new Error(`history http ${history.status}, ${events.length} событий`);
+      lap('history');
+      rec.ok(performance.now() - t0);
+    } catch (e) {
+      rec.fail((e as Error).message);
+    }
+  };
+  const half = Math.floor(archived.length / 2);
+  log(`E2: возврат в архивный чат — ${half} по одному, ${archived.length - half} одновременно`);
+  const backOne = new Recorder();
+  for (const c of archived.slice(0, half)) await returnTo(c, regular[c.members[0]!]!, backOne);
+  const backAll = new Recorder();
+  await Promise.all(archived.slice(half).map((c) => returnTo(c, regular[c.members[0]!]!, backAll, true)));
+  results.E2_archive_return = {
+    one_by_one: backOne.summary(),
+    all_at_once: backAll.summary(),
+    all_at_once_phases: { open_ccs: phases.open.summary(), join: phases.join.summary(), history: phases.history.summary() },
   };
 
   results.database = {

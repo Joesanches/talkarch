@@ -1,4 +1,5 @@
 import { CaseContext, EventType, MsgType, RequestMessage, type RequestStatusContent } from '@konsilium/protocol';
+import type { ArchiveService } from './archive.ts';
 import type { CaseDirectory } from './cases.ts';
 import type { CriticalService } from './critical.ts';
 import type { UserResolver } from './connectors.ts';
@@ -31,13 +32,21 @@ export class RetryLaterError extends Error {}
 /**
  * Обработка событий из транзакций Application Service.
  * Заявка в чате случая → обратный вызов в систему-источник → статус обратно в чат.
- * Критическая находка и подтверждение её получения → CriticalService.
+ * Критическая находка и подтверждение её получения → CriticalService. Активность пользователей → ArchiveService.
  */
 export class EventProcessor {
   private readonly done = new Set<string>();
 
   constructor(
-    private readonly deps: { matrix: MatrixApi; directory: CaseDirectory; requests: RequestStore; users: UserResolver; critical: CriticalService; log: Logger },
+    private readonly deps: {
+      matrix: MatrixApi;
+      directory: CaseDirectory;
+      requests: RequestStore;
+      users: UserResolver;
+      critical: CriticalService;
+      archive: ArchiveService;
+      log: Logger;
+    },
   ) {}
 
   async handle(event: MatrixEvent): Promise<void> {
@@ -46,6 +55,8 @@ export class EventProcessor {
     if (fromUser && event.type === 'm.room.message' && event.content.msgtype === MsgType.Request) await this.onRequest(event);
     if (fromUser && event.type === 'm.room.message' && event.content.msgtype === MsgType.Critical) await this.deps.critical.onMessage(event);
     if (fromUser && event.type === EventType.Ack) await this.deps.critical.onAck(event);
+    // Активность пользователей отодвигает архив закрытого случая.
+    if (fromUser) await this.deps.archive.onActivity(event.room_id).catch((err) => this.deps.log.warn({ err }, 'Активность чата не записана'));
     // Отмечаем только после успешной обработки: при повторе транзакции событие обработается снова.
     this.done.add(event.event_id);
     if (this.done.size > 10_000) {

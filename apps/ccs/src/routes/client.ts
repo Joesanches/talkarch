@@ -19,6 +19,7 @@ const OpenCaseBody = z
 const PatientBody = z.object({ roomId: z.string().startsWith('!'), reason: z.string().max(200).optional() });
 const SecretaryBody = z.object({ roomId: z.string().startsWith('!'), action: z.enum(['start', 'stop']) });
 const CallTokenBody = z.object({ roomId: z.string().startsWith('!'), callId: z.string().regex(/^[\w.-]{1,64}$/).optional() });
+const ArchiveQuery = z.object({ q: z.string().trim().max(128).optional(), limit: z.coerce.number().int().min(1).max(200).default(50) });
 
 function bearer(req: FastifyRequest): string | null {
   const h = req.headers.authorization;
@@ -35,7 +36,7 @@ const issues = (e: z.ZodError) => e.issues.map((i) => i.message).join('; ');
 /** API для клиентов и SDK встраивания: `/api/v1/*`. Аутентификация — токен Matrix пользователя. */
 export async function clientRoutes(app: FastifyInstance, deps: AppDeps) {
   // Веб-клиент работает с другого адреса: разрешаем только его (и SDK встраивания, который грузится оттуда же).
-  await app.register(cors, { origin: [deps.chatWebUrl], methods: ['POST'], allowedHeaders: ['authorization', 'content-type'], maxAge: 600 });
+  await app.register(cors, { origin: [deps.chatWebUrl], methods: ['GET', 'POST'], allowedHeaders: ['authorization', 'content-type'], maxAge: 600 });
 
   // Кеш whoami: токен пользователя → Matrix ID (60 с), чтобы не ходить в Synapse на каждый запрос.
   const whoamiCache = new Map<string, { userId: string; until: number }>();
@@ -67,21 +68,21 @@ export async function clientRoutes(app: FastifyInstance, deps: AppDeps) {
   });
 
   /**
-   * Открыть чат случая из РИС/ЛИС: случай → проверка прав в системе-источнике → комната (создаётся при первом обращении)
-   * → приглашение пользователя.
+   * Сервис уже пустил пользователя в чат случая (эскалация критической находки) или он участвовал в чате до архива —
+   * он может открыть чат и по ссылке, даже если в списках системы-источника его нет. Отозванных это не касается.
    */
-  /**
-   * Сервис уже пустил пользователя в чат случая (эскалация критической находки) — он может открыть чат и по ссылке,
-   * даже если в списках системы-источника его нет. Отозванных это не касается: их выводят из комнаты.
-   */
-  async function invitedByService(ref: CaseRef, userId: string, revoked: string[]): Promise<boolean> {
+  async function knownToService(ref: CaseRef, userId: string, revoked: string[]): Promise<boolean> {
     if (revoked.includes(userId)) return false;
     const roomId = await deps.caseRooms.roomFor(ref);
     if (!roomId) return false;
     const m = await deps.matrix.getMembership(roomId, userId).catch(() => null);
-    return m === 'invite' || m === 'join';
+    return m === 'invite' || m === 'join' || ((await deps.archive.isArchived(roomId)) && (await deps.archive.wasMember(roomId, userId)));
   }
 
+  /**
+   * Открыть чат случая из РИС/ЛИС: случай → проверка прав в системе-источнике → комната (создаётся при первом обращении)
+   * → приглашение пользователя. Архивный чат — возврат только для чтения с полной историей.
+   */
   app.post('/cases/open', async (req, reply) => {
     const userId = await currentUser(req);
     if (!userId) return mxError(reply, 401, 'M_UNAUTHORIZED', 'Нужен токен Matrix');
@@ -101,7 +102,7 @@ export async function clientRoutes(app: FastifyInstance, deps: AppDeps) {
     const ref: CaseRef = { connector: connectorId, caseId: body.data.caseId };
     const hostCase = await deps.directory.find(ref);
     if (!hostCase) return mxError(reply, 404, 'M_NOT_FOUND', 'Случай не найден в системе-источнике');
-    if (!(await deps.directory.canAccess(userId, hostCase)) && !(await invitedByService(ref, userId, hostCase.revoked))) {
+    if (!(await deps.directory.canAccess(userId, hostCase)) && !(await knownToService(ref, userId, hostCase.revoked))) {
       req.log.warn({ userId, connector: ref.connector }, 'Отказ в доступе к случаю');
       return mxError(reply, 403, 'M_FORBIDDEN', 'Нет доступа к случаю в системе-источнике');
     }
@@ -110,8 +111,21 @@ export async function clientRoutes(app: FastifyInstance, deps: AppDeps) {
     // Пока создавалась комната, могло прийти более новое событие case.upserted — догоняем.
     const latest = await deps.registry.get(ref);
     if (room.created && latest && latest.snapshot.version > hostCase.snapshot.version) await deps.caseRooms.sync(room.roomId, latest);
-    const membership = await deps.caseRooms.ensureMember(room.roomId, userId);
-    return { roomId: room.roomId, alias: room.alias, created: room.created, membership, connector: ref.connector, caseId: hostCase.snapshot.case_id };
+    const base = { roomId: room.roomId, alias: room.alias, created: room.created, connector: ref.connector, caseId: hostCase.snapshot.case_id };
+    if (!room.created && (await deps.archive.isArchived(room.roomId))) {
+      return { ...base, membership: await deps.archive.returnUser(room.roomId, userId), archived: true };
+    }
+    return { ...base, membership: await deps.caseRooms.ensureMember(room.roomId, userId), archived: false };
+  });
+
+  /** Папка «Архив»: архивные случаи, в чатах которых пользователь участвовал. Открыть — через `/cases/open`. */
+  app.get('/archive', async (req, reply) => {
+    const userId = await currentUser(req);
+    if (!userId) return mxError(reply, 401, 'M_UNAUTHORIZED', 'Нужен токен Matrix');
+    const query = ArchiveQuery.safeParse(req.query);
+    if (!query.success) return mxError(reply, 400, 'M_INVALID_PARAM', issues(query.error));
+    reply.header('cache-control', 'no-store');
+    return { cases: await deps.archive.list(userId, { limit: query.data.limit, ...(query.data.q ? { q: query.data.q } : {}) }) };
   });
 
   /**
@@ -149,6 +163,8 @@ export async function clientRoutes(app: FastifyInstance, deps: AppDeps) {
     if (!token || !(await currentUser(req))) return mxError(reply, 401, 'M_UNAUTHORIZED', 'Нужен токен Matrix');
     const body = CallTokenBody.safeParse(req.body);
     if (!body.success) return mxError(reply, 400, 'M_BAD_JSON', issues(body.error));
+    // Архивный чат — только чтение: и без звонков (state-событие звонка там тоже запрещено правами комнаты).
+    if (await deps.archive.isArchived(body.data.roomId)) return mxError(reply, 403, 'M_FORBIDDEN', 'Чат случая в архиве — только чтение');
     try {
       const issued = await deps.calls.issue(token, body.data.roomId, body.data.callId);
       // Клиент показывает кнопку стенограммы, только если «Секретарь» включён политикой организации.

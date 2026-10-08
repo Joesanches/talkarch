@@ -35,6 +35,12 @@ const Env = z.object({
   LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
   /** Как часто проверять сроки критических находок (мс): точность эскалации. */
   CRITICAL_TICK_MS: z.coerce.number().int().nonnegative().default(5000),
+  /** Архив: через сколько дней без активности закрытый случай уходит в архив (0 — сразу после закрытия). */
+  ARCHIVE_AFTER_DAYS: z.coerce.number().nonnegative().default(14),
+  /** Сколько часов вернувшийся остаётся в архивном чате, затем снова выводится. */
+  ARCHIVE_RETURN_HOURS: z.coerce.number().positive().default(24),
+  /** Как часто искать чаты для архива (мс); 0 — не искать. */
+  ARCHIVE_TICK_MS: z.coerce.number().int().nonnegative().default(300_000),
 });
 
 export type Config = {
@@ -53,6 +59,7 @@ export type Config = {
   livekit: { url: string; apiKey: string; apiSecret: string; internalUrl?: string };
   /** 0 — таймер не запускается (модульные тесты вызывают tick сами). */
   criticalTickMs: number;
+  archive: { afterMs: number; returnMs: number; tickMs: number };
   ai: {
     profile: 'off' | 'gpu' | 'cpu' | 'external';
     secretaryUrl: string | null;
@@ -81,6 +88,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     chatWebUrl: e.CHAT_WEB_URL.replace(/\/$/, ''),
     livekit: { url: e.LIVEKIT_URL, apiKey: e.LIVEKIT_API_KEY, apiSecret: e.LIVEKIT_API_SECRET, ...(e.LIVEKIT_INTERNAL_URL ? { internalUrl: e.LIVEKIT_INTERNAL_URL } : {}) },
     criticalTickMs: e.CRITICAL_TICK_MS,
+    archive: { afterMs: Math.round(e.ARCHIVE_AFTER_DAYS * 86_400_000), returnMs: Math.round(e.ARCHIVE_RETURN_HOURS * 3_600_000), tickMs: e.ARCHIVE_TICK_MS },
     ai: {
       profile: e.AI_PROFILE ?? (e.SECRETARY_URL ? 'cpu' : 'off'),
       secretaryUrl: e.SECRETARY_URL?.replace(/\/$/, '') ?? null,
