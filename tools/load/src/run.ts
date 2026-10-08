@@ -314,7 +314,10 @@ async function main() {
   const coldIdle = new Recorder();
   for (let i = 0; i < 20; i++) {
     const u = regular[(i * 37) % USERS]!;
-    const r = await hs.call('GET', `/_matrix/client/v3/sync?filter=${encodeURIComponent(CLIENT_FILTER)}&timeout=0`, u.token);
+    const r =
+      SYNC_MODE === 'sliding'
+        ? await hs.call('POST', '/_matrix/client/unstable/org.matrix.simplified_msc3575/sync?timeout=0', u.token, { lists: { rooms: SLIDING_LIST } })
+        : await hs.call('GET', `/_matrix/client/v3/sync?filter=${encodeURIComponent(CLIENT_FILTER)}&timeout=0`, u.token);
     if (r.status === 200) coldIdle.ok(r.ms);
     else coldIdle.fail(`http ${r.status}`);
   }

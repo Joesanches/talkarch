@@ -1,0 +1,308 @@
+{
+  "run": "r3",
+  "started_at": "2026-10-08T20:18:24.454Z",
+  "params": {
+    "USERS": 240,
+    "ROOMS_PER_USER": 20,
+    "CREATE_RATE": 3,
+    "BURST": 20,
+    "BURST_RATE": 1,
+    "HEAVY": 5,
+    "HEAVY_ROOMS": 200,
+    "EVENTS": 500,
+    "MSG_RATES": [
+      2,
+      10,
+      30
+    ],
+    "STEP_S": 60,
+    "SYNC_MODE": "sliding"
+  },
+  "users": {
+    "registration": {
+      "n": 245,
+      "errors": 0,
+      "p50": 384,
+      "p95": 442,
+      "p99": 506,
+      "max": 509,
+      "mean": 390
+    }
+  },
+  "A1_case_snapshots": {
+    "batch_of_100": {
+      "n": 17,
+      "errors": 0,
+      "p50": 322,
+      "p95": 680,
+      "p99": 680,
+      "max": 680,
+      "mean": 334
+    },
+    "events_per_s": 285
+  },
+  "A2_chat_creation_paced": {
+    "rate_per_s": 3,
+    "duration_s": 535,
+    "all": {
+      "n": 1600,
+      "errors": 0,
+      "p50": 5402,
+      "p95": 11638,
+      "p99": 11974,
+      "max": 13069,
+      "mean": 6420
+    },
+    "first_10pct": {
+      "n": 160,
+      "errors": 0,
+      "p50": 2582,
+      "p95": 4414,
+      "p99": 4586,
+      "max": 4635,
+      "mean": 2881
+    },
+    "last_10pct": {
+      "n": 160,
+      "errors": 0,
+      "p50": 2723,
+      "p95": 3336,
+      "p99": 3428,
+      "max": 3555,
+      "mean": 2751
+    },
+    "ccs_cpu_pct": 3,
+    "containers_mid": {
+      "synapse": "118.09% · 200.4MiB",
+      "postgres": "87.12% · 205MiB"
+    }
+  },
+  "A3_chat_creation_peak": {
+    "offered_rate_per_s": 1,
+    "achieved_rooms_per_s": 1,
+    "offered_s": 20,
+    "all": {
+      "n": 20,
+      "errors": 0,
+      "p50": 617,
+      "p95": 1004,
+      "p99": 1017,
+      "max": 1017,
+      "mean": 666
+    },
+    "first_10pct": {
+      "n": 2,
+      "errors": 0,
+      "p50": 636,
+      "p95": 651,
+      "p99": 651,
+      "max": 651,
+      "mean": 643
+    },
+    "last_10pct": {
+      "n": 2,
+      "errors": 0,
+      "p50": 548,
+      "p95": 552,
+      "p99": 552,
+      "max": 552,
+      "mean": 550
+    },
+    "containers_mid": {
+      "synapse": "0.56% · 219.6MiB",
+      "postgres": "3.45% · 241.4MiB"
+    }
+  },
+  "joins": {
+    "n": 5860,
+    "errors": 0,
+    "p50": 924,
+    "p95": 1460,
+    "p99": 1581,
+    "max": 1863,
+    "mean": 924
+  },
+  "B1_notifications": {
+    "batch_of_50": {
+      "n": 10,
+      "errors": 0,
+      "p50": 1964,
+      "p95": 2366,
+      "p99": 2366,
+      "max": 2366,
+      "mean": 1959
+    },
+    "events_per_s": 26
+  },
+  "B2_case_updates": {
+    "batch_of_50": {
+      "n": 10,
+      "errors": 0,
+      "p50": 4323,
+      "p95": 5179,
+      "p99": 5179,
+      "max": 5179,
+      "mean": 4461
+    },
+    "events_per_s": 11
+  },
+  "C0_send_without_clients": {
+    "rate_per_s": 2,
+    "send": {
+      "n": 120,
+      "errors": 0,
+      "p50": 81,
+      "p95": 95,
+      "p99": 115,
+      "max": 117,
+      "mean": 83
+    }
+  },
+  "D1_cold_start_regular": {
+    "rooms_per_user": 20,
+    "one_by_one": {
+      "n": 20,
+      "errors": 0,
+      "p50": 600,
+      "p95": 704,
+      "p99": 743,
+      "max": 743,
+      "mean": 584
+    },
+    "all_at_once": {
+      "n": 240,
+      "errors": 0,
+      "p50": 42959,
+      "p95": 47242,
+      "p99": 47325,
+      "max": 47328,
+      "mean": 41168
+    }
+  },
+  "C_message_delivery": {
+    "clients": 240,
+    "steps": [
+      {
+        "rate_per_s": 2,
+        "duration_s": 60,
+        "send": {
+          "n": 120,
+          "errors": 0,
+          "p50": 88,
+          "p95": 179,
+          "p99": 298,
+          "max": 674,
+          "mean": 103
+        },
+        "delivery": {
+          "n": 240,
+          "errors": 0,
+          "p50": 115,
+          "p95": 265,
+          "p99": 356,
+          "max": 717,
+          "mean": 133
+        },
+        "delivered_pct": 100,
+        "ccs_cpu_pct": 0,
+        "containers_mid": {
+          "synapse": "0.44% · 429.3MiB",
+          "postgres": "3.68% · 290.4MiB"
+        }
+      },
+      {
+        "rate_per_s": 10,
+        "duration_s": 60,
+        "send": {
+          "n": 600,
+          "errors": 0,
+          "p50": 153,
+          "p95": 932,
+          "p99": 1427,
+          "max": 2151,
+          "mean": 283
+        },
+        "delivery": {
+          "n": 1200,
+          "errors": 0,
+          "p50": 185,
+          "p95": 1137,
+          "p99": 1571,
+          "max": 2152,
+          "mean": 336
+        },
+        "delivered_pct": 100,
+        "ccs_cpu_pct": 1,
+        "containers_mid": {
+          "synapse": "3.65% · 430.1MiB",
+          "postgres": "3.43% · 291.7MiB"
+        }
+      },
+      {
+        "rate_per_s": 30,
+        "duration_s": 103,
+        "send": {
+          "n": 1800,
+          "errors": 0,
+          "p50": 43148,
+          "p95": 47619,
+          "p99": 47778,
+          "max": 48814,
+          "mean": 35659
+        },
+        "delivery": {
+          "n": 3600,
+          "errors": 0,
+          "p50": 45835,
+          "p95": 57030,
+          "p99": 61441,
+          "max": 68058,
+          "mean": 40155
+        },
+        "delivered_pct": 100,
+        "ccs_cpu_pct": 0,
+        "containers_mid": {
+          "synapse": "118.59% · 431.1MiB",
+          "postgres": "68.43% · 296.3MiB"
+        }
+      }
+    ]
+  },
+  "D2_cold_start_heavy": {
+    "rooms_per_user": 200,
+    "initial_sync_first": {
+      "n": 5,
+      "errors": 0,
+      "p50": 5667,
+      "p95": 5858,
+      "p99": 5858,
+      "max": 5858,
+      "mean": 5668
+    },
+    "initial_sync_repeat_cached": {
+      "n": 10,
+      "errors": 0,
+      "p50": 122,
+      "p95": 132,
+      "p99": 132,
+      "max": 132,
+      "mean": 123
+    },
+    "sliding_sync_first_20": {
+      "n": 15,
+      "errors": 0,
+      "p50": 79,
+      "p95": 148,
+      "p99": 148,
+      "max": 148,
+      "mean": 94
+    }
+  },
+  "database": {
+    "synapse_db": "217 MB",
+    "rooms": "1620",
+    "events": "31560",
+    "users": "245"
+  },
+  "finished_at": "2026-10-08T20:41:19.675Z"
+}
