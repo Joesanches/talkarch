@@ -21,6 +21,8 @@ pnpm dev:users
 pnpm dev:web
 ```
 
+Веб-клиент синхронизируется через Simplified Sliding Sync (Synapse 1.162 поддерживает его без настройки); обычная синхронизация — `?sync=classic` в адресе или `"slidingSync": false` в `config.json`.
+
 Откройте чат случая так же, как его откроет кнопка в ЛИС: <http://localhost:5173/c/lis/Г26-04512>. Встраивание в РИС — демо-страница песочницы <http://localhost:8090/demo/ris> (вход во фрейме как `orlov`). Вход — `smirnova`, пароль `dev-only-password-1`. Цвет бренда можно примерить параметром `?accent=0E7C6B`.
 
 Проверка:

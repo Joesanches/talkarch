@@ -11,6 +11,7 @@ import {
 } from 'matrix-js-sdk';
 import { EventType } from '@konsilium/protocol';
 import { config } from './config.ts';
+import { startSync } from './sync.ts';
 import { criticalStatuses, type TimelineItem } from './model.ts';
 
 export interface Session {
@@ -61,8 +62,8 @@ export async function login(username: string, password: string): Promise<Session
 
 export function startClient(s: Session): MatrixClient {
   const client = createClient({ baseUrl: s.baseUrl, userId: s.userId, accessToken: s.accessToken, deviceId: s.deviceId });
-  // Шаг 2 PoC — обычная синхронизация с ленивой загрузкой участников. Simplified Sliding Sync — следующим шагом.
-  void client.startClient({ initialSyncLimit: 30, lazyLoadMembers: true });
+  // Simplified Sliding Sync, если сервер его поддерживает (sync.ts); иначе — обычная синхронизация.
+  void startSync(client).catch((err) => console.error('Синхронизация не запустилась', err));
   return client;
 }
 

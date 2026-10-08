@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { NotificationCountType, SyncState, type MatrixClient, type Room } from 'matrix-js-sdk';
 import { FOLDERS, criticalWaitingFor, foldersOf, initials, avatarColor, type Folder } from '../model.ts';
 import { CcsError, directRoomIds, openCase, roomCriticals, startClient, useClientUpdates, useSyncState, type Session } from '../matrix.ts';
+import { focusRooms } from '../sync.ts';
 import { ChatList } from './ChatList.tsx';
 import { CallPanel } from './CallPanel.tsx';
 import { ChatView } from './ChatView.tsx';
@@ -70,6 +71,8 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
   const counts = new Map<Folder, number>();
   for (const r of rooms) for (const f of folderOf(r)) counts.set(f, (counts.get(f) ?? 0) + unread(r));
 
+  // Открытый чат и чат идущего звонка — с полным состоянием и лентой (Sliding Sync).
+  useEffect(() => focusRooms(client, [selected, call?.roomId]), [client, selected, call?.roomId]);
   const current = selected ? client.getRoom(selected) : null;
   const me = client.getUser(session.userId);
   const myName = me?.displayName ?? session.userId;
@@ -142,7 +145,7 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
           />
         ) : (
           <div className="chat-empty">
-            <p>Выберите чат слева или откройте случай из РИС или ЛИС</p>
+            <p>{selected ? 'Загрузка чата…' : 'Выберите чат слева или откройте случай из РИС или ЛИС'}</p>
           </div>
         )}
       </section>

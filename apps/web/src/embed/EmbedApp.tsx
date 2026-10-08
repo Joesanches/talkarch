@@ -8,6 +8,7 @@ import { Login } from '../components/Login.tsx';
 import { isAllowedHostOrigin } from '../config.ts';
 import { CcsError, clearSession, loadSession, openCase, saveSession, sessionFromToken, startClient, useClientUpdates, useSyncState, type Session } from '../matrix.ts';
 import { caseUnread, sendKeyImage } from '../media.ts';
+import { focusRooms } from '../sync.ts';
 import { bridgeFor, type Bridge } from './bridge.ts';
 
 function applyTheme(accent?: string) {
@@ -162,6 +163,8 @@ function EmbedInner({ client, session, mode, bridge, initial, onUnauthorized }: 
     lastSent.current = snapshot;
     bridge.send('unread.changed', { total, byContext });
   });
+
+  useEffect(() => focusRooms(client, [roomId]), [client, roomId]);
 
   if (mode === 'headless') return null;
   const room = roomId ? client.getRoom(roomId) : null;

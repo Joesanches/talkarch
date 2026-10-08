@@ -10,6 +10,8 @@ export const config = {
   embedOrigins: [] as string[],
   /** Конфигурация прочитана из /config.json (стенд, продукт), а не взята по умолчанию для разработки. */
   fromFile: false,
+  /** `false` — обычная синхронизация даже там, где сервер поддерживает Sliding Sync. */
+  slidingSync: true as boolean,
 };
 
 /** Прочитать /config.json, если он есть. Ошибки не мешают запуску — остаются значения по умолчанию. */
@@ -17,10 +19,11 @@ export async function loadRuntimeConfig(): Promise<void> {
   try {
     const res = await fetch('/config.json', { cache: 'no-store' });
     if (!res.ok || !res.headers.get('content-type')?.includes('json')) return;
-    const json = (await res.json()) as { hsUrl?: unknown; ccsUrl?: unknown; embedOrigins?: unknown };
+    const json = (await res.json()) as { hsUrl?: unknown; ccsUrl?: unknown; embedOrigins?: unknown; slidingSync?: unknown };
     if (typeof json.hsUrl === 'string') config.hsUrl = json.hsUrl.replace(/\/$/, '');
     if (typeof json.ccsUrl === 'string') config.ccsUrl = json.ccsUrl.replace(/\/$/, '');
     if (Array.isArray(json.embedOrigins)) config.embedOrigins = json.embedOrigins.filter((o): o is string => typeof o === 'string');
+    if (json.slidingSync === false) config.slidingSync = false;
     config.fromFile = true;
   } catch {
     /* нет файла — окружение разработчика */
