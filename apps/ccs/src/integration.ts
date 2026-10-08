@@ -33,15 +33,32 @@ export function isTransient(e: unknown): boolean {
   return true;
 }
 
+/** Обработанные события (подключение + id) — для идемпотентности. Контракт: помним не меньше 7 дней. */
+export interface ProcessedEvents {
+  has(connector: string, eventId: string): Promise<boolean>;
+  add(connector: string, eventId: string, status: EventResult['status']): Promise<void>;
+}
+
+export class InMemoryProcessedEvents implements ProcessedEvents {
+  private readonly items = new Set<string>();
+  async has(connector: string, eventId: string) {
+    return this.items.has(`${connector}\n${eventId}`);
+  }
+  async add(connector: string, eventId: string) {
+    this.items.add(`${connector}\n${eventId}`);
+    if (this.items.size > 50_000) {
+      const oldest = this.items.values().next().value;
+      if (oldest !== undefined) this.items.delete(oldest);
+    }
+  }
+}
+
 /**
  * Приём событий от РИС, ЛИС и ТМК: `POST /integration/v1/events`.
  * Каждое событие обрабатывается отдельно и получает свой итог; порядок внутри пакета сохраняется.
  * Контракт — docs/10-integration-api.md.
  */
 export class IntegrationService {
-  /** Обработанные события (подключение + id) — для идемпотентности. В продукте — таблица с TTL 7 дней. */
-  private readonly processed = new Set<string>();
-
   constructor(
     private readonly deps: {
       matrix: MatrixApi;
@@ -49,6 +66,7 @@ export class IntegrationService {
       registry: CaseRegistry;
       caseRooms: CaseRoomService;
       requests: RequestStore;
+      processed: ProcessedEvents;
       log: Logger;
     },
   ) {}
@@ -68,8 +86,7 @@ export class IntegrationService {
     if (event.source !== connector.id) {
       return { id, status: 'rejected', detail: `source «${event.source}» не совпадает с подключением «${connector.id}»` };
     }
-    const key = `${connector.id}\n${event.id}`;
-    if (this.processed.has(key)) return { id, status: 'duplicate' };
+    if (await this.deps.processed.has(connector.id, event.id)) return { id, status: 'duplicate' };
 
     const schema = eventDataSchemas[event.type as IntegrationEventType];
     if (!schema) return { id, status: 'rejected', detail: `Неизвестный тип события: ${event.type}` };
@@ -88,7 +105,7 @@ export class IntegrationService {
         default:
           outcome = await this.notificationPosted(connector, data.data as NotificationPosted, event.id);
       }
-      this.remember(key);
+      await this.deps.processed.add(connector.id, event.id, outcome.status);
       return { id, ...outcome };
     } catch (e) {
       if (isTransient(e)) {
@@ -100,13 +117,6 @@ export class IntegrationService {
     }
   }
 
-  private remember(key: string) {
-    this.processed.add(key);
-    if (this.processed.size > 50_000) {
-      const oldest = this.processed.values().next().value;
-      if (oldest !== undefined) this.processed.delete(oldest);
-    }
-  }
 
   /** Снимок случая: обновить реестр; если чат уже есть — привести комнату к снимку. Чат не создаётся. */
   private async caseUpserted(connector: Connector, snapshot: CaseSnapshot): Promise<Outcome> {
@@ -128,7 +138,10 @@ export class IntegrationService {
     if (tracked.caseId.toUpperCase() !== data.case_id.toUpperCase()) {
       return { status: 'rejected', detail: `Заявка ${data.external_id} относится к другому случаю` };
     }
-    if (data.steps) tracked.steps = data.steps;
+    if (data.steps) {
+      tracked.steps = data.steps;
+      await this.deps.requests.updateSteps(connector.id, data.external_id, data.steps);
+    }
     const content: RequestStatusContent = {
       'm.relates_to': { rel_type: 'm.reference', event_id: tracked.eventId },
       external_id: data.external_id,

@@ -12,6 +12,8 @@ const Env = z.object({
   AS_ID: z.string().min(1).default('konsilium-ccs'),
   ALIAS_SECRET: z.string().min(16),
   CONNECTORS_FILE: z.string().min(1).default('fixtures/connectors.json'),
+  /** PostgreSQL для реестра случаев, заявок и идемпотентности. Без него — память (данные теряются при перезапуске). */
+  DATABASE_URL: z.string().url().optional(),
   CHAT_WEB_URL: z.string().url().default('http://localhost:5173'),
   LIVEKIT_URL: z.string().min(1).default('ws://localhost:7880'),
   LIVEKIT_API_KEY: z.string().min(1),
@@ -29,6 +31,7 @@ export type Config = {
   asId: string;
   aliasSecret: string;
   connectorsFile: string;
+  databaseUrl?: string;
   chatWebUrl: string;
   livekit: { url: string; apiKey: string; apiSecret: string };
 };
@@ -46,6 +49,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     asId: e.AS_ID,
     aliasSecret: e.ALIAS_SECRET,
     connectorsFile: e.CONNECTORS_FILE,
+    databaseUrl: e.DATABASE_URL,
     chatWebUrl: e.CHAT_WEB_URL.replace(/\/$/, ''),
     livekit: { url: e.LIVEKIT_URL, apiKey: e.LIVEKIT_API_KEY, apiSecret: e.LIVEKIT_API_SECRET },
   };

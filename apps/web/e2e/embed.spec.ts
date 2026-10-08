@@ -43,7 +43,7 @@ test('встраивание в РИС: панель чата, ключевой 
   await test.step('сообщение лаборанта в другом исследовании — бейдж в рабочем списке', async () => {
     const tech = await (await browser.newContext()).newPage();
     await loginViaCaseLink(tech, 'safonova', 'ris', 'A26-118735');
-    await tech.getByLabel('Сообщение').fill('Исследование выполнено, серии в PACS');
+    await tech.getByLabel('Сообщение', { exact: true }).fill('Исследование выполнено, серии в PACS');
     await tech.keyboard.press('Enter');
     await expect(ris.locator('tr[data-case="A26-118735"] .badge')).toHaveText(/^[1-9]\d*$/, { timeout: 20_000 });
     if (SHOTS) await ris.screenshot({ path: `${SHOTS}/ris-embed.png` });

@@ -6,6 +6,7 @@
 import { createHmac } from 'node:crypto';
 import { resolve } from 'node:path';
 import type { FastifyInstance } from 'fastify';
+import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createHostMock, type HostMock } from '@konsilium/host-mock';
 import { EventType, MsgType, NotificationField, RoomType } from '@konsilium/protocol';
@@ -19,6 +20,9 @@ const CCS_PORT = 8080;
 const CCS = `http://127.0.0.1:${CCS_PORT}`;
 const MOCK_PORT = 8090;
 const LIS_CASE = 'Г26-04512';
+// Хранилище — настоящий PostgreSQL из infra/ (своя база на прогон, удаляется в конце).
+const PG_ADMIN = process.env.IT_PG_URL ?? 'postgres://synapse:synapse-dev@localhost:55432/postgres';
+const PG_DB = `ccs_it_${Date.now()}`;
 const RIS_CASE = 'A26-118734';
 const enc = encodeURIComponent;
 
@@ -81,6 +85,8 @@ describe('Чат случая на Synapse с песочницей РИС/ЛИС
   let mock: HostMock;
   const tok: Record<string, string> = {};
   let roomId = '';
+  let serviceConfig: ReturnType<typeof loadConfig>;
+  let ihcExternalId = '';
 
   beforeAll(async () => {
     const versions = await fetch(`${HS}/_matrix/client/versions`).catch(() => null);
@@ -99,6 +105,7 @@ describe('Чат случая на Synapse с песочницей РИС/ЛИС
       HS_TOKEN: 'dev-only-hs-token-0123456789abcdef',
       ALIAS_SECRET: `dev-only-alias-secret-it-${Date.now()}`,
       CONNECTORS_FILE: resolve(import.meta.dirname, '../../fixtures/connectors.json'),
+      DATABASE_URL: PG_ADMIN.replace(/\/postgres$/, `/${PG_DB}`),
       LIVEKIT_API_KEY: 'devkey',
       LIVEKIT_API_SECRET: 'secret',
     });
@@ -113,6 +120,7 @@ describe('Чат случая на Synapse с песочницей РИС/ЛИС
     // Песочница стартует первой: при старте сервис контекста просит Synapse дослать накопленные события,
     // и заявки из прошлых прогонов должны найти ЛИС.
     await mock.app.listen({ host: '127.0.0.1', port: MOCK_PORT });
+    serviceConfig = config;
     app = createService(config, { logger: false, log: { info() {}, warn() {}, error: console.error } }).app;
     await app.listen({ host: config.host, port: config.port });
   });
@@ -120,6 +128,10 @@ describe('Чат случая на Synapse с песочницей РИС/ЛИС
   afterAll(async () => {
     await mock?.app.close();
     await app?.close();
+    const admin = new pg.Client({ connectionString: PG_ADMIN });
+    await admin.connect();
+    await admin.query(`drop database if exists "${PG_DB}"`);
+    await admin.end();
   });
 
   it('система-источник отправляет снимки случаев; чаты при этом не создаются', async () => {
@@ -183,6 +195,7 @@ describe('Чат случая на Synapse с песочницей РИС/ЛИС
     expect(all.every((e) => e.sender === '@ccs:konsilium.test')).toBe(true);
     expect(all.map((e) => e.content.status)).toEqual(['accepted', 'staining', 'scanning', 'done']);
     expect(all[0].content).toMatchObject({ external_id: expect.stringMatching(/^ИГХ-\d+$/), source: 'LIS' });
+    ihcExternalId = all[0].content.external_id;
   });
 
   it('изменение случая в ЛИС: новый участник приглашён, отозванный выведен, название обновлено', async () => {
@@ -222,6 +235,21 @@ describe('Чат случая на Synapse с песочницей РИС/ЛИС
     const res = await api(tok.belova!, '/api/v1/cases/open', { system: 'RIS', caseId: RIS_CASE });
     expect(res.json).toMatchObject({ connector: 'ris', created: true, membership: 'invite' });
     expect((await api(tok.gusev!, '/api/v1/cases/open', { connector: 'ris', caseId: RIS_CASE })).status).toBe(403);
+  });
+
+  it('после перезапуска сервиса статус старой заявки доходит до чата (хранилище в PostgreSQL)', async () => {
+    await app.close();
+    app = createService(serviceConfig, { logger: false, log: { info() {}, warn() {}, error: console.error } }).app;
+    await app.listen({ host: serviceConfig.host, port: serviceConfig.port });
+    const res = await mock.setRequestStatus('lis', ihcExternalId, 'rejected', 'Блок 1А исчерпан — нужен повторный забор');
+    expect(res.body.results[0]).toMatchObject({ status: 'accepted' });
+    const status = await waitFor(async () =>
+      (await timeline(tok.smirnova!, roomId)).find((e) => e.type === EventType.RequestStatus && e.content?.status === 'rejected'),
+    );
+    expect(status.content).toMatchObject({ external_id: ihcExternalId, note: 'Блок 1А исчерпан — нужен повторный забор' });
+    // Повтор того же события после перезапуска — дубликат (идемпотентность тоже в базе).
+    const again = await mock.setRequestStatus('lis', ihcExternalId, 'rejected', 'Блок 1А исчерпан — нужен повторный забор');
+    expect(again.body.results[0]).toMatchObject({ status: 'duplicate' });
   });
 
   it('токен видеосвязи — только вошедшему участнику комнаты', async () => {

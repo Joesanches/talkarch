@@ -12,6 +12,9 @@ services:
       POSTGRES_DB: synapse
       # Synapse требует сортировку C.
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    # Порт для сервиса контекста на хосте (база ccs); 55432 — чтобы не мешать локальному PostgreSQL.
+    ports:
+      - "55432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

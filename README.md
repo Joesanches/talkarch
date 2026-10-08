@@ -58,7 +58,7 @@ pnpm install
 pnpm test                               # модульные тесты (81)
 cd infra && docker compose up -d && cd ..
 pnpm dev:users                          # пользователи стенда (пароль dev-only-password-1)
-pnpm test:it                            # интеграционные тесты на Synapse (12)
+pnpm test:it                            # интеграционные тесты на Synapse и PostgreSQL (17)
 pnpm e2e                                # сквозные тесты в браузере: чат, звонок, встраивание в РИС (5)
 ```
 

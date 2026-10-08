@@ -5,9 +5,10 @@ import { CaseDirectory, InMemoryCaseRegistry } from './cases.ts';
 import { CaseRoomService, InMemoryCaseRoomStore } from './caseRooms.ts';
 import { loadConfig, type Config } from './config.ts';
 import { ConnectorRegistry, UserResolver, type Connector } from './connectors.ts';
+import { createPool, ensureDatabase, migrate, PgCaseRegistry, PgCaseRoomStore, PgProcessedEvents, PgRequestStore } from './db.ts';
 import { EventProcessor, type Logger } from './events.ts';
 import { HttpHostCallbacks, type HostCallbacks } from './host.ts';
-import { IntegrationService } from './integration.ts';
+import { InMemoryProcessedEvents, IntegrationService } from './integration.ts';
 import { HttpMatrixApi, type MatrixApi } from './matrix.ts';
 import { InMemoryRequestStore } from './requests.ts';
 
@@ -25,8 +26,13 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
   const matrix = opts.matrix ?? new HttpMatrixApi(config.hsUrl, config.asToken, config.botUserId);
   const connectors = opts.connectors ?? ConnectorRegistry.fromFile(resolve(config.connectorsFile));
   const users = new UserResolver(config.serverName);
-  const registry = new InMemoryCaseRegistry();
-  const requests = new InMemoryRequestStore();
+  const log = opts.log ?? console;
+  // Хранилище: PostgreSQL, если задан DATABASE_URL; иначе память (модульные тесты, быстрый старт).
+  const pool = config.databaseUrl ? createPool(config.databaseUrl) : null;
+  const registry = pool ? new PgCaseRegistry(pool) : new InMemoryCaseRegistry();
+  const requests = pool ? new PgRequestStore(pool) : new InMemoryRequestStore();
+  const roomStore = pool ? new PgCaseRoomStore(pool) : new InMemoryCaseRoomStore();
+  const processed = pool ? new PgProcessedEvents(pool) : new InMemoryProcessedEvents();
   const callbacks = new Map<string, HostCallbacks>();
   const callbacksFor = (c: Connector) => {
     if (!c.callbacks) return null;
@@ -34,9 +40,8 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
     return callbacks.get(c.id)!;
   };
   const directory = new CaseDirectory({ registry, connectors, users, callbacksFor });
-  const caseRooms = new CaseRoomService(matrix, new InMemoryCaseRoomStore(), { aliasSecret: config.aliasSecret, serverName: config.serverName });
+  const caseRooms = new CaseRoomService(matrix, roomStore, { aliasSecret: config.aliasSecret, serverName: config.serverName });
   const calls = new CallTokenService(matrix, { ...config.livekit, roomSecret: config.aliasSecret });
-  const log = opts.log ?? console;
   const app = buildApp({
     hsToken: config.hsToken,
     chatWebUrl: config.chatWebUrl,
@@ -48,9 +53,27 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
     caseRooms,
     calls,
     events: new EventProcessor({ matrix, directory, requests, users, log }),
-    integration: new IntegrationService({ matrix, directory, registry, caseRooms, requests, log }),
+    integration: new IntegrationService({ matrix, directory, registry, caseRooms, requests, processed, log }),
     logger: opts.logger ?? true,
   });
+  if (pool && config.databaseUrl) {
+    const url = config.databaseUrl;
+    let pruneTimer: ReturnType<typeof setInterval> | undefined;
+    // До приёма запросов: база есть, миграции применены. Ошибка здесь останавливает запуск — без хранилища работать нельзя.
+    app.addHook('onReady', async () => {
+      await ensureDatabase(url, log);
+      const applied = await migrate(pool);
+      if (applied) log.info({ applied }, 'Миграции базы сервиса контекста применены');
+      const prune = () => (processed as PgProcessedEvents).prune().catch((err) => log.warn({ err }, 'Очистка событий не удалась'));
+      void prune();
+      pruneTimer = setInterval(prune, 3600_000);
+      pruneTimer.unref();
+    });
+    app.addHook('onClose', async () => {
+      if (pruneTimer) clearInterval(pruneTimer);
+      await pool.end();
+    });
+  }
   // Имя сервиса в лентах чатов вместо технического «ccs». Ошибка не мешает запуску.
   if (matrix instanceof HttpMatrixApi) {
     app.addHook('onReady', async () => {

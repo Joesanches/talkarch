@@ -10,10 +10,11 @@ export interface TrackedRequest {
   steps: RequestStep[];
 }
 
-/** В PoC — память; в продукте — таблица PostgreSQL (иначе статусы после перезапуска не найдут свою заявку). */
+/** Память — для тестов; PostgreSQL (db.ts) — чтобы статусы после перезапуска находили свою заявку. */
 export interface RequestStore {
   add(r: TrackedRequest): Promise<void>;
   find(connector: string, externalId: string): Promise<TrackedRequest | null>;
+  updateSteps(connector: string, externalId: string, steps: TrackedRequest['steps']): Promise<void>;
 }
 
 export class InMemoryRequestStore implements RequestStore {
@@ -22,6 +23,11 @@ export class InMemoryRequestStore implements RequestStore {
     this.items.set(`${r.connector}\n${r.externalId}`, r);
   }
   async find(connector: string, externalId: string) {
-    return this.items.get(`${connector}\n${externalId}`) ?? null;
+    const r = this.items.get(`${connector}\n${externalId}`);
+    return r ? { ...r } : null;
+  }
+  async updateSteps(connector: string, externalId: string, steps: TrackedRequest['steps']) {
+    const r = this.items.get(`${connector}\n${externalId}`);
+    if (r) r.steps = steps;
   }
 }

@@ -27,7 +27,7 @@ test('врач открывает чат случая по ссылке из Л�
 
   await test.step('сообщение уходит и появляется справа', async () => {
     const text = `Коллеги, посмотрите блок 1А — нужна ИГХ`;
-    await page.getByLabel('Сообщение').fill(text);
+    await page.getByLabel('Сообщение', { exact: true }).fill(text);
     await page.keyboard.press('Enter');
     await expect(page.locator('.msg.out').last()).toContainText(text);
     await expect(page.locator('.msg.out .meta').last()).not.toHaveText('отправка…');
