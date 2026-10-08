@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { CLIENT_FILTER, Hs } from './hs.ts';
+import { CLIENT_FILTER, Hs, SLIDING_LIST } from './hs.ts';
 import { Recorder, paced, pool, sleep } from './stats.ts';
 
 const env = process.env;
@@ -39,6 +39,8 @@ const HEAVY_ROOMS = num('HEAVY_ROOMS', 200);
 const EVENTS = num('INTEGRATION_EVENTS', 1000);
 const MSG_RATES = (env.MSG_RATES ?? '2,10,30').split(',').map(Number);
 const STEP_S = num('STEP_S', 60);
+/** Как синхронизируются клиенты: `classic` — long-poll /sync, `sliding` — Simplified Sliding Sync, как веб-клиент. */
+const SYNC_MODE = env.SYNC_MODE === 'sliding' ? 'sliding' : 'classic';
 const RUN = env.RUN_ID ?? Date.now().toString(36);
 const ROOT = resolve(import.meta.dirname, '../../..');
 const OUT = resolve(env.OUT ?? join(ROOT, 'tools/load/results', `load-${RUN}.json`));
@@ -46,7 +48,7 @@ const OUT = resolve(env.OUT ?? join(ROOT, 'tools/load/results', `load-${RUN}.jso
 const PASSWORD = 'dev-only-load-password-1';
 const LOAD_TOKEN = 'dev-only-load-token-0123456789abcdef';
 const hs = new Hs(HS_URL, env.SYNAPSE_REGISTRATION_SECRET ?? 'dev-only-registration-shared-secret');
-const results: Record<string, unknown> = { run: RUN, started_at: new Date().toISOString(), params: { USERS, ROOMS_PER_USER, CREATE_RATE, BURST, BURST_RATE, HEAVY, HEAVY_ROOMS, EVENTS, MSG_RATES, STEP_S } };
+const results: Record<string, unknown> = { run: RUN, started_at: new Date().toISOString(), params: { USERS, ROOMS_PER_USER, CREATE_RATE, BURST, BURST_RATE, HEAVY, HEAVY_ROOMS, EVENTS, MSG_RATES, STEP_S, SYNC_MODE } };
 const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
 // ── Ресурсы ──────────────────────────────────────────────────────────────────
@@ -318,7 +320,7 @@ async function main() {
   }
 
   // C. Клиенты синхронизации и доставка сообщений. Все стартуют разом — это и замер массового переподключения.
-  log(`C: ${USERS} клиентов синхронизации (long-poll, фильтр веб-клиента)`);
+  log(`C: ${USERS} клиентов синхронизации (${SYNC_MODE === 'sliding' ? 'Simplified Sliding Sync, окно 20 комнат' : 'long-poll, фильтр веб-клиента'})`);
   const abort = new AbortController();
   const sentAt = new Map<string, { t: number; sender: number; step: number }>();
   const delivery = MSG_RATES.map(() => new Recorder());
@@ -328,9 +330,18 @@ async function main() {
   const loops = regular.map(async (u, idx) => {
     let since: string | undefined;
     while (!abort.signal.aborted) {
-      const path = `/_matrix/client/v3/sync?filter=${encodeURIComponent(CLIENT_FILTER)}&timeout=${since ? 30000 : 0}${since ? `&since=${since}` : ''}`;
+      const wait = since ? 30000 : 0;
       try {
-        const r = await hs.call<any>('GET', path, u.token, undefined, abort.signal);
+        const r =
+          SYNC_MODE === 'sliding'
+            ? await hs.call<any>(
+                'POST',
+                `/_matrix/client/unstable/org.matrix.simplified_msc3575/sync?timeout=${wait}${since ? `&pos=${since}` : ''}`,
+                u.token,
+                { lists: { rooms: SLIDING_LIST } },
+                abort.signal,
+              )
+            : await hs.call<any>('GET', `/_matrix/client/v3/sync?filter=${encodeURIComponent(CLIENT_FILTER)}&timeout=${wait}${since ? `&since=${since}` : ''}`, u.token, undefined, abort.signal);
         if (r.status !== 200) {
           await sleep(1000);
           continue;
@@ -340,9 +351,10 @@ async function main() {
           coldRegular.ok(r.ms);
           ready += 1;
         }
-        since = r.json.next_batch;
-        for (const room of Object.values<any>(r.json.rooms?.join ?? {})) {
-          for (const ev of room.timeline?.events ?? []) {
+        since = SYNC_MODE === 'sliding' ? r.json.pos : r.json.next_batch;
+        const rooms = SYNC_MODE === 'sliding' ? Object.values<any>(r.json.rooms ?? {}).map((x) => x.timeline ?? []) : Object.values<any>(r.json.rooms?.join ?? {}).map((x) => x.timeline?.events ?? []);
+        for (const timeline of rooms) {
+          for (const ev of timeline) {
             const body = ev.content?.body;
             if (typeof body !== 'string' || !body.startsWith('load:')) continue;
             const sent = sentAt.get(body);

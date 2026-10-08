@@ -45,3 +45,18 @@ export class Hs {
 
 /** Фильтр синхронизации как у веб-клиента: ленивая загрузка участников, 30 событий ленты на комнату. */
 export const CLIENT_FILTER = JSON.stringify({ room: { state: { lazy_load_members: true }, timeline: { limit: 30, lazy_load_members: true } } });
+
+/** Список Simplified Sliding Sync как у веб-клиента (apps/web/src/sync.ts): окно 20 комнат, 3 события ленты. */
+export const SLIDING_LIST = {
+  ranges: [[0, 19]],
+  timeline_limit: 3,
+  required_state: [
+    ['m.room.create', ''],
+    ['m.room.name', ''],
+    ['ru.vendor.case.context', ''],
+    ['ru.vendor.critical.status', '*'],
+    ['ru.vendor.call', '*'],
+    ['m.room.member', '$ME'],
+    ['m.room.member', '$LAZY'],
+  ],
+};
