@@ -1,0 +1,14 @@
+{
+  "name": "@konsilium/load",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Нагрузочный тест PoC: создание чатов случаев, события интеграции, доставка сообщений при многих клиентах синхронизации, холодный старт",
+  "type": "module",
+  "scripts": {
+    "load": "tsx src/run.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@konsilium/protocol": "workspace:*"
+  }
+}

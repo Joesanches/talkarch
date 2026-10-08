@@ -10,3 +10,5 @@ playwright-report
 .venv/
 __pycache__/
 .pytest_cache/
+tools/load/results/*
+!tools/load/results/load-r*.json

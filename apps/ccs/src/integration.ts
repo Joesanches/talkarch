@@ -55,9 +55,19 @@ export class InMemoryProcessedEvents implements ProcessedEvents {
   }
 }
 
+/** Сколько случаев пакета обрабатывать одновременно. */
+const CASE_CONCURRENCY = 8;
+
+/** Ключ порядка: события одного случая — строго по очереди, разных случаев — параллельно. */
+function orderKey(item: unknown, index: number): string {
+  const caseId = (item as { data?: { case_id?: unknown } } | null)?.data?.case_id;
+  return typeof caseId === 'string' && caseId.trim() ? caseId.trim().toUpperCase() : `#${index}`;
+}
+
 /**
  * Приём событий от РИС, ЛИС и ТМК: `POST /integration/v1/events`.
- * Каждое событие обрабатывается отдельно и получает свой итог; порядок внутри пакета сохраняется.
+ * Каждое событие обрабатывается отдельно и получает свой итог (в порядке пакета). События одного случая применяются
+ * по порядку, разных случаев — параллельно: так пакет из сотни событий не ждёт каждое по очереди.
  * Контракт — docs/10-integration-api.md.
  */
 export class IntegrationService {
@@ -75,8 +85,19 @@ export class IntegrationService {
   ) {}
 
   async process(connector: Connector, items: unknown[]): Promise<EventResult[]> {
-    const results: EventResult[] = [];
-    for (const item of items) results.push(await this.processOne(connector, item));
+    const results = new Array<EventResult>(items.length);
+    const groups = new Map<string, number[]>();
+    items.forEach((item, i) => {
+      const k = orderKey(item, i);
+      const g = groups.get(k);
+      if (g) g.push(i);
+      else groups.set(k, [i]);
+    });
+    const queue = [...groups.values()];
+    const worker = async () => {
+      for (let g = queue.shift(); g; g = queue.shift()) for (const i of g) results[i] = await this.processOne(connector, items[i]);
+    };
+    await Promise.all(Array.from({ length: Math.min(CASE_CONCURRENCY, queue.length) }, worker));
     return results;
   }
 

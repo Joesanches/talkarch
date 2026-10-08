@@ -1,0 +1,10 @@
+# Отдельный стенд для нагрузочного теста: чистые PostgreSQL и Synapse рядом с окружением разработчика.
+#   docker compose -p konsilium-load -f infra/docker-compose.yml -f tools/load/docker-compose.load.yml up -d synapse
+# Synapse — 18008, PostgreSQL — 55433. Сервис контекста для него запускает сам тест (порт 8080, как в appservice-ccs.yaml).
+services:
+  postgres:
+    ports: !override
+      - "55433:5432"
+  synapse:
+    ports: !override
+      - "18008:8008"

@@ -117,6 +117,12 @@ importers:
 
   packages/tokens: {}
 
+  tools/load:
+    dependencies:
+      '@konsilium/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+
 packages:
 
   '@babel/code-frame@7.29.7':

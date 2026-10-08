@@ -63,6 +63,26 @@ describe('POST /integration/v1/events: приём', () => {
     expect(results[7].warnings[0]).toMatch(/не сопоставлен/);
   });
 
+  it('пакет из разных случаев: итоги — в порядке пакета, внутри случая — по порядку версий', async () => {
+    const other = (version: number) => snapshot({ case_id: 'Г26-09999', version });
+    const res = await h.events('lis', [
+      ev('m1', snapshot({ version: 10 })),
+      ev('m2', other(1)),
+      ev('m3', snapshot({ version: 11 })),
+      ev('m4', other(2)),
+      ev('m5', snapshot({ version: 9 })), // старше уже применённых 10 и 11 — значит, они применены раньше
+      ev('m6', other(1)),
+    ]);
+    expect(res.json().results.map((r: { id: string; status: string }) => `${r.id}:${r.status}`)).toEqual([
+      'm1:accepted',
+      'm2:accepted',
+      'm3:accepted',
+      'm4:accepted',
+      'm5:stale',
+      'm6:stale',
+    ]);
+  });
+
   it('принимает одно событие с типом application/cloudevents+json', async () => {
     const res = await h.app.inject({
       method: 'POST',
