@@ -111,8 +111,8 @@ export const roomArchived = (room: Room) => isArchivedState(room.currentState.ge
 
 /** Сервис вывел пользователя из архивного чата (а не он вышел сам). */
 export function removedToArchive(room: Room, me: string | null): boolean {
-  if (room.getMyMembership() !== 'leave' || !roomArchived(room)) return false;
-  const by = room.currentState.getStateEvents('m.room.member', me ?? '')?.getSender();
+  if (!me || room.getMyMembership() !== 'leave' || !roomArchived(room)) return false;
+  const by = room.currentState.getStateEvents('m.room.member', me)?.getSender();
   return !!by && by !== me;
 }
 
@@ -122,8 +122,8 @@ const forgetting = new WeakMap<MatrixClient, Set<string>>();
  * Забыть архивные чаты, из которых сервис вывел пользователя. Иначе Sliding Sync продолжает отдавать их в списке
  * (выведенный — не то же, что вышедший сам), и у врача за годы копятся тысячи комнат. Вернуться можно из папки «Архив».
  *
- * Комната остаётся в памяти клиента (список показывает только join и invite): если её удалить, matrix-js-sdk
- * отбросит следующее приглашение в неё — сервер пришлёт его не как «первые данные» комнаты.
+ * Комната удаляется и из памяти клиента: если она вернётся (случай снова открыт, возврат из архива), сервер пришлёт
+ * её заново целиком.
  */
 export function forgetArchived(client: MatrixClient) {
   const me = client.getUserId();
@@ -132,14 +132,14 @@ export function forgetArchived(client: MatrixClient) {
   for (const room of client.getRooms()) {
     if (done.has(room.roomId) || !removedToArchive(room, me)) continue;
     done.add(room.roomId);
-    void client.forget(room.roomId, false).catch(() => done.delete(room.roomId));
+    void client.forget(room.roomId, true).catch(() => done.delete(room.roomId));
   }
 }
 
 /** Убрать вернувшийся архивный чат из списка: выйти и забыть (история остаётся в архиве). */
 export async function closeArchived(client: MatrixClient, roomId: string) {
   await client.leave(roomId);
-  await client.forget(roomId, false);
+  await client.forget(roomId, true);
 }
 
 /**

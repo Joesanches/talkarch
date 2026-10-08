@@ -83,6 +83,12 @@ export async function startSync(client: MatrixClient): Promise<SyncMode> {
     end = next;
     ss.setListRanges(LIST, [[0, end]]);
   });
+  // Приглашение в комнату, которую клиент «забыл» (архив, затем случай снова открыт): сервер присылает его как
+  // продолжение, а matrix-js-sdk отбрасывает продолжение для неизвестной комнаты. Для клиента комната новая — помечаем
+  // данные первыми, до обработчика SDK (он подписан позже, в startClient). При входе сервер присылает комнату целиком.
+  ss.on(SlidingSyncEvent.RoomData, (roomId, data) => {
+    if (data.invite_state && !data.initial && !client.getRoom(roomId)) data.initial = true;
+  });
   sliding.set(client, ss);
   await client.startClient({ slidingSync: ss, lazyLoadMembers: true });
   return mode;

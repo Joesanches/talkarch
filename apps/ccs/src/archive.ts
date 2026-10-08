@@ -47,7 +47,10 @@ export interface ArchiveStore {
   /** Кого вывели из комнаты при архивировании — для папки «Архив» и возврата. */
   addMembers(roomId: string, userIds: string[]): Promise<void>;
   isArchived(roomId: string): Promise<boolean>;
-  /** Комната вернулась из архива: снова активна, список выведенных больше не нужен. */
+  /**
+   * Комната вернулась из архива — случай снова открыт: не в архиве, не закрыт (сразу, а не после синхронизации со
+   * снимком — иначе проход архива успеет отправить её обратно), список выведенных больше не нужен.
+   */
   restore(roomId: string): Promise<void>;
   wasMember(roomId: string, userId: string): Promise<boolean>;
   /** Доступ к случаю отозван: убрать из выведенных — случая не будет в папке «Архив», вернуться нельзя. */
@@ -107,6 +110,7 @@ export class InMemoryArchiveStore implements ArchiveStore {
     const r = this.rooms.get(roomId);
     if (!r) return;
     r.archivedAt = null;
+    r.closedAt = null;
     r.members.clear();
   }
   async wasMember(roomId: string, userId: string) {

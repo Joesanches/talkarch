@@ -355,7 +355,8 @@ describe('Чат случая на Synapse с песочницей РИС/ЛИС
     const before = (await sss(tok.melnikova!))[archRoom];
     expect(before?.required_state?.find((e) => e.type === EventType.CaseArchive)?.content.status).toBe('archived');
     expect((await cs(tok.melnikova!, 'POST', `/rooms/${enc(archRoom)}/forget`, {})).status).toBe(200);
-    expect(Object.keys(await sss(tok.melnikova!))).not.toContain(archRoom);
+    // С воркерами «забыл» доходит до воркера синхронизации репликацией — с небольшой задержкой.
+    await waitFor(async () => (Object.keys(await sss(tok.melnikova!)).includes(archRoom) ? undefined : true));
 
     // Папка «Архив» — у обоих участников.
     const list = await fetch(`${CCS}/api/v1/archive?q=${enc(CASE)}`, { headers: { authorization: `Bearer ${tok.melnikova}` } }).then((r) => r.json() as Promise<any>);

@@ -188,6 +188,23 @@ describe('Архив чатов случаев', () => {
     expect(await archiveOf('smirnova')).toHaveLength(1);
   });
 
+  it('проход архива во время возврата из архива не отправляет чат обратно', async () => {
+    const roomId = await lisRoom();
+    await closeCase(T0);
+    now = T0 + 15 * DAY;
+    await h.service.archive.tick();
+    // Синхронизация снимка «снова открыт» идёт медленно (запись контекста); проход архива — посередине.
+    let ticked: Promise<unknown> | null = null;
+    h.matrix.stateDelay = (type) => {
+      if (type === EventType.CaseContext && !ticked) ticked = h.service.archive.tick();
+      return type === EventType.CaseContext ? 20 : 0;
+    };
+    await h.mock.updateCase('lis', LIS_CASE, { status: 'open' });
+    expect(await ticked).toEqual({ archived: 0, removed: 0 });
+    expect(await archiveState(roomId)).toMatchObject({ status: 'active' });
+    expect(await h.service.archive.isArchived(roomId)).toBe(false);
+  });
+
   it('папка «Архив»: поиск по номеру и названию, без токена — 401', async () => {
     const roomId = await lisRoom();
     await closeCase(T0);

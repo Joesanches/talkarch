@@ -408,7 +408,7 @@ export class PgArchiveStore implements ArchiveStore {
     const client = await this.pool.connect();
     try {
       await client.query('begin');
-      await client.query('update case_lifecycle set archived_at = null where room_id = $1', [roomId]);
+      await client.query('update case_lifecycle set archived_at = null, closed_at = null where room_id = $1', [roomId]);
       await client.query('delete from case_archive_members where room_id = $1', [roomId]);
       await client.query('commit');
     } catch (e) {

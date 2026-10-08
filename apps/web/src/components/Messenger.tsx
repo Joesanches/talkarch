@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { NotificationCountType, RoomEvent, SyncState, type MatrixClient, type Room } from 'matrix-js-sdk';
+import { ClientEvent, NotificationCountType, SyncState, type MatrixClient, type Room } from 'matrix-js-sdk';
 import type { ArchivedCase } from '@konsilium/protocol';
 import { FOLDERS, criticalWaitingFor, foldersOf, initials, avatarColor, type Folder } from '../model.ts';
 import { CcsError, directRoomIds, openCase, removedToArchive, roomCriticals, startClient, useClientUpdates, useSyncState, type Session } from '../matrix.ts';
@@ -77,17 +77,19 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
   useEffect(() => focusRooms(client, [selected, call?.roomId]), [client, selected, call?.roomId]);
   const current = selected ? client.getRoom(selected) : null;
   // Открытый чат перенесён в архив (сервис вывел участников) — закрываем его и подсказываем, где искать.
+  // Проверка — раз на ответ синхронизации, когда он обработан целиком (до того, как клиент «забудет» комнату).
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   useEffect(() => {
-    const onMembership = (room: Room) => {
-      if (room.roomId !== selectedRef.current || !removedToArchive(room, session.userId)) return;
+    const onSync = () => {
+      const room = selectedRef.current ? client.getRoom(selectedRef.current) : null;
+      if (!room || !removedToArchive(room, session.userId)) return;
       setSelected(null);
       setBanner('Чат перенесён в архив — открыть его можно из папки «Архив»');
     };
-    client.on(RoomEvent.MyMembership, onMembership);
+    client.on(ClientEvent.Sync, onSync);
     return () => {
-      client.off(RoomEvent.MyMembership, onMembership);
+      client.off(ClientEvent.Sync, onSync);
     };
   }, [client, session.userId]);
   const me = client.getUser(session.userId);
