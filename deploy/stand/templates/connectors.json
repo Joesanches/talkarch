@@ -7,14 +7,28 @@
       "org": "stand",
       "title": "ЛИС патоморфологии (песочница)",
       "token_sha256": "__LIS_TOKEN_SHA__",
-      "callbacks": { "url": "http://host-mock:8090/lis", "token": "__LIS_CALLBACK_TOKEN__" }
+      "callbacks": { "url": "http://host-mock:8090/lis", "token": "__LIS_CALLBACK_TOKEN__" },
+      "critical": {
+        "ack_deadline": "PT10M",
+        "escalation": [
+          { "after": "PT10M", "action": "call", "target": "Пост 3 онкологии" },
+          { "after": "PT15M", "action": "notify", "target": "head", "users": ["gusev"] }
+        ]
+      }
     },
     {
       "id": "ris",
       "kind": "RIS",
       "org": "stand",
       "title": "РИС (песочница)",
-      "token_sha256": "__RIS_TOKEN_SHA__"
+      "token_sha256": "__RIS_TOKEN_SHA__",
+      "critical": {
+        "ack_deadline": "PT10M",
+        "escalation": [
+          { "after": "PT10M", "action": "call", "target": "Пост приёмного отделения" },
+          { "after": "PT20M", "action": "notify", "target": "head", "users": ["gusev"] }
+        ]
+      }
     },
     {
       "id": "team",

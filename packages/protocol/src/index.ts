@@ -27,7 +27,13 @@ export const EventType = {
   RequestStatus: `${NS}.request.status`,
   /** Принятие или отклонение черновика (протокола ИИ) врачом — ссылка на сообщение-черновик. */
   ReportStatus: `${NS}.report.status`,
+  /** Подтверждение получения критической находки — ссылка `m.reference` на неё. Засчитывает сервис контекста. */
   Ack: `${NS}.ack`,
+  /**
+   * Статус критической находки — state-событие, state_key = ID сообщения-находки. Пишет только сервис контекста
+   * (уровень 100): адресаты, срок, эскалации, кто и когда подтвердил. Клиенты верят ему, а не сырым `ru.vendor.ack`.
+   */
+  CriticalStatus: `${NS}.critical.status`,
   Call: `${NS}.call`,
   CallInvite: `${NS}.call.invite`,
 } as const;
@@ -216,17 +222,87 @@ export const RequestStatusContent = z.object({
 });
 export type RequestStatusContent = z.infer<typeof RequestStatusContent>;
 
+/** Длительность ISO 8601 в минутах и секундах: `PT10M`, `PT30S`, `PT1M30S`. */
+export const IsoDuration = z
+  .string()
+  .regex(/^PT(?:\d+M)?(?:\d+S)?$/)
+  .refine((v) => v !== 'PT', 'Пустая длительность');
+
+/** Длительность `PT…` → секунды. */
+export function durationSeconds(iso: string): number {
+  const m = /^PT(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso);
+  if (!m) throw new Error(`Не длительность ISO 8601: ${iso}`);
+  return Number(m[1] ?? 0) * 60 + Number(m[2] ?? 0);
+}
+
+const MatrixUserId = z.string().regex(/^@[^:\s]+:\S+$/);
+
+/** Шаг эскалации: через `after` от отправки — уведомить и подключить (`notify`) или позвонить на пост (`call`). */
+export const CriticalEscalationStep = z.object({
+  after: IsoDuration,
+  action: z.enum(['notify', 'call']),
+  /** Роль в случае (`head`, `on_duty`…) или название поста для звонка. */
+  target: z.string().trim().min(1).max(200),
+  /** Кого подключить к чату (для `notify`), если роль в случае не назначена. */
+  users: z.array(MatrixUserId).max(20).default([]),
+});
+export type CriticalEscalationStep = z.infer<typeof CriticalEscalationStep>;
+
+/**
+ * Критическая находка — `m.room.message` с msgtype `ru.vendor.critical`. Адресат — роль в случае и/или конкретные люди.
+ * Пришла из РИС/ЛИС — отправитель сервис, врач — в `reported_by`.
+ */
 export const CriticalMessage = MessageBase.extend({
   msgtype: z.literal(MsgType.Critical),
   [MsgType.Critical]: z.object({
-    finding: z.string().min(1),
-    recipient: z.object({ role: z.string().min(1), resolved_user: z.string().optional() }),
-    ack_required: z.literal(true),
-    ack_deadline: z.string().regex(/^PT\d+M$/),
-    escalation: z.array(z.object({ after: z.string().regex(/^PT\d+M$/), action: z.enum(['call', 'notify']), target: z.string() })).default([]),
+    finding: z.string().trim().min(1).max(1000),
+    recipient: z
+      .object({ role: CaseRole.optional(), users: z.array(MatrixUserId).max(10).default([]) })
+      .refine((r) => r.role || r.users.length, 'Нужна роль адресата или пользователи'),
+    ack_required: z.literal(true).default(true),
+    ack_deadline: IsoDuration.default('PT10M'),
+    /** Пусто — план эскалации подключения по умолчанию. */
+    escalation: z.array(CriticalEscalationStep).max(5).default([]),
+    reported_by: MatrixUserId.optional(),
+    /** Номер находки в РИС/ЛИС (если пришла оттуда). */
+    host_finding_id: z.string().max(128).optional(),
   }),
 });
 export type CriticalMessage = z.infer<typeof CriticalMessage>;
+
+/** Подтверждение получения: `ru.vendor.ack` со ссылкой на находку. */
+export const AckContent = z.object({
+  'm.relates_to': z.object({ rel_type: z.literal('m.reference'), event_id: z.string().min(1) }),
+});
+export type AckContent = z.infer<typeof AckContent>;
+
+/** `ru.vendor.critical.status` — состояние находки глазами сервиса контекста. */
+export const CriticalStatusContent = z.object({
+  /** `rejected` — находку отправил тот, кому это не положено, или адресата нет. */
+  status: z.enum(['pending', 'acknowledged', 'rejected']),
+  raised_at: z.string(),
+  /** Срок подтверждения. */
+  deadline_at: z.string(),
+  /** Кто может подтвердить: адресаты и подключённые эскалацией. */
+  recipients: z.array(MatrixUserId).default([]),
+  reported_by: MatrixUserId,
+  escalations: z
+    .array(
+      z.object({
+        at: z.string(),
+        action: z.enum(['notify', 'call']),
+        target: z.string(),
+        users: z.array(MatrixUserId).default([]),
+        /** Звонок передан в систему-источник (телефония — на её стороне). */
+        delivered: z.boolean().optional(),
+      }),
+    )
+    .default([]),
+  next_escalation_at: z.string().optional(),
+  acknowledged: z.object({ by: MatrixUserId, at: z.string(), seconds: z.number().int().nonnegative() }).optional(),
+  note: z.string().max(300).optional(),
+});
+export type CriticalStatusContent = z.infer<typeof CriticalStatusContent>;
 
 export const NotificationCategory = z.enum(['info', 'ready', 'report', 'warning']);
 export type NotificationCategory = z.infer<typeof NotificationCategory>;

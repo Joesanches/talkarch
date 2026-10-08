@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { CallTokenService } from './calls.ts';
 import type { CaseDirectory, CaseRegistry } from './cases.ts';
 import type { CaseRoomService } from './caseRooms.ts';
+import type { CriticalService } from './critical.ts';
 import type { ConnectorRegistry, UserResolver } from './connectors.ts';
 import type { EventProcessor } from './events.ts';
 import type { IntegrationService } from './integration.ts';
@@ -26,6 +27,7 @@ export interface AppDeps {
   events: EventProcessor;
   integration: IntegrationService;
   secretary: SecretaryService;
+  critical: CriticalService;
   logger?: boolean;
 }
 

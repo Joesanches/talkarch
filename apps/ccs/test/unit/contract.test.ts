@@ -15,6 +15,8 @@ import {
   CloudEvent,
   CreateRequestRequest,
   CreateRequestResponse,
+  CriticalFindingEvent,
+  CriticalFindingsResponse,
   EventsResponse,
   PatientRevealRequest,
   PatientRevealResponse,
@@ -44,6 +46,8 @@ const integrationExamples: Record<string, (v: unknown) => void> = {
   CaseUpserted: checkEvent,
   RequestStatusChanged: checkEvent,
   NotificationPosted: checkEvent,
+  CriticalRaised: checkEvent,
+  CriticalFindingsResponse: (v) => CriticalFindingsResponse.parse(v),
   Batch: (v) => (v as unknown[]).forEach(checkEvent),
   EventsResponse: (v) => EventsResponse.parse(v),
   ChatInfo: (v) => ChatInfo.parse(v),
@@ -58,6 +62,7 @@ const callbackExamples: Record<string, z.ZodTypeAny> = {
   CreateRequestResponse,
   PatientRevealRequest,
   PatientRevealResponse,
+  CriticalFindingEvent,
 };
 
 const methods = ['get', 'put', 'post', 'delete', 'patch'] as const;

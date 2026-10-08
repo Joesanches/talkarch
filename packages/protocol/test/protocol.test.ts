@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CaseContext, MsgType, caseKey, parseStructured, requestFallbackBody } from '../src/index.ts';
+import { CaseContext, CriticalMessage, MsgType, caseKey, durationSeconds, parseStructured, requestFallbackBody } from '../src/index.ts';
 
 describe('caseKey', () => {
   it('нормализует регистр номера и пробелы', () => {
@@ -94,5 +94,22 @@ describe('requestFallbackBody', () => {
     expect(
       requestFallbackBody({ kind: 'ihc', block: '1А', items: ['ER', 'PR'], priority: 'urgent' }),
     ).toBe('Запрос ИГХ: блок 1А — ER, PR (срочно)');
+  });
+});
+
+describe('критическая находка', () => {
+  it('длительности ISO 8601: минуты и секунды', () => {
+    expect(durationSeconds('PT10M')).toBe(600);
+    expect(durationSeconds('PT90S')).toBe(90);
+    expect(durationSeconds('PT1M30S')).toBe(90);
+    expect(() => durationSeconds('10 минут')).toThrow();
+  });
+
+  it('адресат обязателен; срок по умолчанию — 10 минут', () => {
+    const base = { msgtype: MsgType.Critical, body: 'Критическая находка: ТЭЛА' };
+    const ok = CriticalMessage.parse({ ...base, [MsgType.Critical]: { finding: 'ТЭЛА', recipient: { role: 'on_duty' } } });
+    expect(ok[MsgType.Critical]).toMatchObject({ ack_deadline: 'PT10M', ack_required: true, escalation: [] });
+    expect(CriticalMessage.safeParse({ ...base, [MsgType.Critical]: { finding: 'ТЭЛА', recipient: {} } }).success).toBe(false);
+    expect(CriticalMessage.safeParse({ ...base, [MsgType.Critical]: { finding: 'ТЭЛА', recipient: { role: 'on_duty' }, ack_deadline: 'PT' } }).success).toBe(false);
   });
 });

@@ -1,8 +1,9 @@
 /**
  * Песочница системы-источника (РИС/ЛИС): эталон того, что делает сторона РИС/ЛИС в интеграции с «Консилиумом».
  *
- * 1. Отправляет события в сервис контекста: `case.upserted`, `request.status.changed`, `notification.posted`.
- * 2. Отвечает на обратные вызовы (уровень 2): снимок случая, проверка прав, заявка из чата, раскрытие пациента.
+ * 1. Отправляет события в сервис контекста: `case.upserted`, `request.status.changed`, `notification.posted`, `critical.raised`.
+ * 2. Отвечает на обратные вызовы (уровень 2): снимок случая, проверка прав, заявка из чата, раскрытие пациента,
+ *    события критических находок (журнал: отправлена, эскалация, подтверждена).
  *
  * Контракт — docs/10-integration-api.md. Данные — fixtures/cases.json (вымышленные).
  */
@@ -17,6 +18,8 @@ import {
   AccessCheckRequest,
   CaseSnapshot,
   CreateRequestRequest,
+  CriticalFindingEvent,
+  CriticalRaised,
   IntegrationEventType,
   PatientRevealRequest,
   PatientRevealResponse,
@@ -83,6 +86,8 @@ export function createHostMock(opts: HostMockOptions) {
   const cases = new Map<string, MockCase[]>(Object.entries(fixture.connectors).map(([id, c]) => [id, c.cases]));
   const requests = new Map<string, MockRequest>(); // Idempotency-Key → заявка
   const audit: Array<{ connector: string; caseId: string; login: string; action: string; at: string }> = [];
+  /** Журнал критических находок «системы-источника»: что пришло обратными вызовами (ключ идемпотентности → событие). */
+  const criticalEvents = new Map<string, CriticalFindingEvent & { connector: string }>();
   const timers = new Set<NodeJS.Timeout>();
   let requestSeq = 7780;
 
@@ -153,6 +158,11 @@ export function createHostMock(opts: HostMockOptions) {
 
   async function notify(connectorId: string, caseId: string, text: string, extra: Record<string, unknown> = {}) {
     return push(connectorId, [event(connectorId, IntegrationEventType.NotificationPosted, randomUUID(), { case_id: caseId, text, ...extra })]);
+  }
+
+  /** Критическая находка из «системы-источника» (например, рентгенолог отметил её в РИС). */
+  async function raiseCritical(connectorId: string, data: z.input<typeof CriticalRaised>) {
+    return push(connectorId, [event(connectorId, IntegrationEventType.CriticalRaised, `crit:${data.finding_id}`, data)]);
   }
 
   async function setRequestStatus(connectorId: string, externalId: string, status: RequestStep, note?: string) {
@@ -266,12 +276,26 @@ export function createHostMock(opts: HostMockOptions) {
     return found.host_only.patient;
   });
 
+  app.post('/:connector/critical-findings/events', async (req, reply) => {
+    const c = authorize(req, reply);
+    if (!c) return reply;
+    const key = req.headers['idempotency-key'];
+    if (typeof key !== 'string' || !key) return reply.code(400).send({ title: 'Нужен заголовок Idempotency-Key', status: 400 });
+    const body = parse(CriticalFindingEvent, req, reply);
+    if (!body) return reply;
+    if (!criticalEvents.has(key)) {
+      criticalEvents.set(key, { ...(body as CriticalFindingEvent), connector: c.id });
+      app.log.info({ type: body.type, finding: body.finding_id, case: body.case_id }, 'Критическая находка: событие в журнал');
+    }
+    return reply.code(202).send();
+  });
+
   app.addHook('onClose', async () => {
     for (const t of timers) clearTimeout(t);
     timers.clear();
   });
 
-  return { app, cases, requests, audit, push, pushCases, updateCase, notify, setRequestStatus };
+  return { app, cases, requests, audit, criticalEvents, push, pushCases, updateCase, notify, raiseCritical, setRequestStatus };
 }
 
 export type HostMock = ReturnType<typeof createHostMock>;

@@ -56,6 +56,7 @@ export function renderRisDemo(chatUrl: string, studies: DemoStudy[]): string {
   .badge-cell { text-align: center; padding-left: 0; padding-right: 8px; }
   .badge { display: none; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; background: #1F6FB2; color: #fff; font-size: 12px; font-weight: 600; line-height: 22px; text-align: center; }
   .badge.on { display: inline-block; }
+  .badge.crit { background: #C62828; }
   .viewer { background: #0E141B; color: #E8EEF4; }
   .viewer h2 { color: #9AA7B4; border-color: #26313D; }
   .stage { flex: 1; display: grid; place-items: center; min-height: 0; padding: 8px; }
@@ -130,8 +131,12 @@ export function renderRisDemo(chatUrl: string, studies: DemoStudy[]): string {
       const item = items.find((i) => i.caseId.toUpperCase() === row.dataset.case.toUpperCase());
       const badge = row.querySelector('.badge');
       const n = item ? item.unread + (item.invited ? 1 : 0) : 0;
-      badge.textContent = n ? String(n) : '';
-      badge.classList.toggle('on', n > 0);
+      // Критическая находка ждёт подтверждения — красный «!» вместо числа.
+      const crit = item && item.critical > 0;
+      badge.textContent = crit ? '!' : n ? String(n) : '';
+      badge.classList.toggle('on', n > 0 || crit);
+      badge.classList.toggle('crit', !!crit);
+      badge.setAttribute('aria-label', crit ? 'Критическая находка ждёт подтверждения' : 'Непрочитанные сообщения');
     }
   });
 

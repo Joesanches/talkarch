@@ -92,7 +92,7 @@ describe('Чат случая на Synapse с песочницей РИС/ЛИС
     const versions = await fetch(`${HS}/_matrix/client/versions`).catch(() => null);
     if (!versions?.ok) throw new Error(`Synapse недоступен на ${HS}. Запустите: cd infra && docker compose up -d`);
 
-    for (const u of ['smirnova', 'ershova', 'kolesnikov', 'gusev', 'outsider', 'orlov', 'belova', 'petrov']) tok[u] = await ensureUser(u);
+    for (const u of ['smirnova', 'ershova', 'kolesnikov', 'gusev', 'outsider', 'orlov', 'belova', 'petrov', 'melnikova']) tok[u] = await ensureUser(u);
 
     // Подключения — из конфигурации разработчика (fixtures/connectors.json). Секрет псевдонимов свой на каждый
     // прогон: новые псевдонимы, а значит, новые комнаты в той же базе Synapse.
@@ -108,6 +108,7 @@ describe('Чат случая на Synapse с песочницей РИС/ЛИС
       DATABASE_URL: PG_ADMIN.replace(/\/postgres$/, `/${PG_DB}`),
       LIVEKIT_API_KEY: 'devkey',
       LIVEKIT_API_SECRET: 'secret',
+      CRITICAL_TICK_MS: '300',
     });
     mock = createHostMock({
       ccsUrl: CCS,
@@ -237,6 +238,63 @@ describe('Чат случая на Synapse с песочницей РИС/ЛИС
     expect((await api(tok.gusev!, '/api/v1/cases/open', { connector: 'ris', caseId: RIS_CASE })).status).toBe(403);
   });
 
+  it('критическая находка: из чата и из РИС, статус пишет только сервис, эскалация, подтверждение адресатом', async () => {
+    const ris = (await api(tok.orlov!, '/api/v1/cases/open', { connector: 'ris', caseId: RIS_CASE })).json.roomId as string;
+    for (const u of ['orlov', 'melnikova']) expect((await cs(tok[u]!, 'POST', `/join/${enc(ris)}`, {})).status).toBe(200);
+    const statusOf = async (eventId: string) => (await cs(tok.melnikova!, 'GET', `/rooms/${enc(ris)}/state/${EventType.CriticalStatus}/${enc(eventId)}`)).json;
+
+    // Из чата: рентгенолог → дежурный врач (роль из РИС). Событие проходит через Synapse и Application Service.
+    const sent = await cs(tok.orlov!, 'PUT', `/rooms/${enc(ris)}/send/m.room.message/it-crit-${Date.now()}`, {
+      msgtype: MsgType.Critical,
+      body: 'Критическая находка: двусторонняя ТЭЛА',
+      [MsgType.Critical]: { finding: 'Двусторонняя ТЭЛА', recipient: { role: 'on_duty' }, ack_deadline: 'PT10M' },
+    });
+    const chatFinding = sent.json.event_id as string;
+    expect(await waitFor(async () => ((await statusOf(chatFinding)).status ? statusOf(chatFinding) : undefined))).toMatchObject({
+      status: 'pending',
+      recipients: ['@melnikova:konsilium.test'],
+      reported_by: '@orlov:konsilium.test',
+    });
+    // Участник не может сам «подтвердить» в статусе — его пишет только сервис (уровень 100).
+    const forged = await cs(tok.melnikova!, 'PUT', `/rooms/${enc(ris)}/state/${EventType.CriticalStatus}/${enc(chatFinding)}`, { status: 'acknowledged' });
+    expect(forged.status).toBe(403);
+
+    // Из РИС: короткий срок и эскалация на заведующего.
+    const raised = await mock.raiseCritical('ris', {
+      case_id: RIS_CASE,
+      finding_id: `КН-IT-${Date.now()}`,
+      finding: 'Свободный газ в брюшной полости',
+      reported_by: { login: 'orlov' },
+      recipient: { role: 'on_duty' },
+      ack_deadline: 'PT2S',
+      escalation: [{ after: 'PT2S', action: 'notify', target: 'head', users: [{ login: 'gusev' }] }],
+    });
+    expect(raised.body.results[0]).toMatchObject({ status: 'accepted' });
+    const hostFinding = await waitFor(async () =>
+      (await timeline(tok.melnikova!, ris)).find((e) => e.content?.msgtype === MsgType.Critical && e.content[MsgType.Critical]?.host_finding_id),
+    );
+    expect(hostFinding.sender).toBe('@ccs:konsilium.test');
+    const escalated = await waitFor(async () => {
+      const st = await statusOf(hostFinding.event_id);
+      return st.escalations?.length ? st : undefined;
+    });
+    expect(escalated.recipients).toEqual(['@melnikova:konsilium.test', '@gusev:konsilium.test']);
+    // Статус пишется до приглашения (чтобы попасть в приглашение) — приглашение догоняет.
+    await waitFor(async () => ((await membership(tok.melnikova!, ris, '@gusev:konsilium.test')) === 'invite' ? true : undefined));
+
+    // Подтверждения — событием ru.vendor.ack; чужое не засчитывается.
+    const ackFor = (token: string, target: string) =>
+      cs(token, 'PUT', `/rooms/${enc(ris)}/send/${EventType.Ack}/it-ack-${Date.now()}-${Math.random()}`, { 'm.relates_to': { rel_type: 'm.reference', event_id: target } });
+    expect((await ackFor(tok.orlov!, chatFinding)).status).toBe(200);
+    await waitFor(async () => ((await timeline(tok.melnikova!, ris)).some((e) => String(e.content?.body ?? '').startsWith('Подтверждение не засчитано')) ? true : undefined));
+    expect((await statusOf(chatFinding)).status).toBe('pending');
+    for (const f of [chatFinding, hostFinding.event_id]) await ackFor(tok.melnikova!, f);
+    for (const f of [chatFinding, hostFinding.event_id]) {
+      const st = await waitFor(async () => ((await statusOf(f)).status === 'acknowledged' ? statusOf(f) : undefined));
+      expect(st.acknowledged.by).toBe('@melnikova:konsilium.test');
+    }
+  });
+
   it('после перезапуска сервиса статус старой заявки доходит до чата (хранилище в PostgreSQL)', async () => {
     await app.close();
     app = createService(serviceConfig, { logger: false, log: { info() {}, warn() {}, error: console.error } }).app;
@@ -250,6 +308,11 @@ describe('Чат случая на Synapse с песочницей РИС/ЛИС
     // Повтор того же события после перезапуска — дубликат (идемпотентность тоже в базе).
     const again = await mock.setRequestStatus('lis', ihcExternalId, 'rejected', 'Блок 1А исчерпан — нужен повторный забор');
     expect(again.body.results[0]).toMatchObject({ status: 'duplicate' });
+    // Журнал критических находок тоже пережил перезапуск — отчёт для РИС.
+    const report = await fetch(`${CCS}/integration/v1/critical-findings`, { headers: { authorization: 'Bearer dev-only-ris-token-0123456789abcdef' } });
+    const findings = ((await report.json()) as { findings: Array<{ status: string; escalations: unknown[] }> }).findings;
+    expect(findings.map((f) => f.status)).toEqual(['acknowledged', 'acknowledged']);
+    expect(findings[1]!.escalations).toHaveLength(1);
   });
 
   it('токен видеосвязи — только вошедшему участнику комнаты', async () => {

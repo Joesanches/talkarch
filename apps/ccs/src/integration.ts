@@ -5,6 +5,7 @@ import {
   IntegrationEventType,
   eventDataSchemas,
   type CaseSnapshot,
+  type CriticalRaised,
   type EventResult,
   type NotificationPosted,
   type RequestStatusChanged,
@@ -13,6 +14,7 @@ import type { ZodError } from 'zod';
 import type { CaseDirectory, CaseRegistry } from './cases.ts';
 import type { CaseRoomService } from './caseRooms.ts';
 import type { Connector } from './connectors.ts';
+import type { CriticalService } from './critical.ts';
 import type { Logger } from './events.ts';
 import { HostError } from './host.ts';
 import { MatrixError, type MatrixApi } from './matrix.ts';
@@ -67,6 +69,7 @@ export class IntegrationService {
       caseRooms: CaseRoomService;
       requests: RequestStore;
       processed: ProcessedEvents;
+      critical: CriticalService;
       log: Logger;
     },
   ) {}
@@ -101,6 +104,9 @@ export class IntegrationService {
           break;
         case IntegrationEventType.RequestStatusChanged:
           outcome = await this.requestStatusChanged(connector, data.data as RequestStatusChanged, event.id);
+          break;
+        case IntegrationEventType.CriticalRaised:
+          outcome = await this.deps.critical.onRaised(connector, data.data as CriticalRaised, event.id);
           break;
         default:
           outcome = await this.notificationPosted(connector, data.data as NotificationPosted, event.id);

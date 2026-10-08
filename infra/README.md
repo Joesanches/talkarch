@@ -70,11 +70,12 @@ pnpm e2e         # сквозные тесты веб-клиента: Playwright
 
 **Для РИС/ЛИС** (токен подключения) — `/integration/v1/*`, см. [docs/10-integration-api.md](../docs/10-integration-api.md):
 
-- `POST /integration/v1/events` — события CloudEvents;
+- `POST /integration/v1/events` — события CloudEvents (в т.ч. `critical.raised` — критическая находка);
+- `GET /integration/v1/critical-findings` — критические находки подключения: время подтверждения, эскалации;
 - `GET` и `PUT /integration/v1/cases/{caseId}/chat` — есть ли чат, создать чат;
 - `GET /integration/v1/connector` — проверка подключения.
 
-**Для Synapse** — `/_matrix/app/v1/*` (Application Service API). Заявка в чате случая уходит в ЛИС обратным вызовом, статусы `ru.vendor.request.status` возвращаются в чат.
+**Для Synapse** — `/_matrix/app/v1/*` (Application Service API). Заявка в чате случая уходит в ЛИС обратным вызовом, статусы `ru.vendor.request.status` возвращаются в чат. Критическая находка (`ru.vendor.critical`) и подтверждение (`ru.vendor.ack`) обрабатываются так же: сервис ведёт статус, срок и эскалацию (план — `critical` в `fixtures/connectors.json`, проверка сроков — каждые `CRITICAL_TICK_MS`, по умолчанию 5 с).
 
 ## ИИ-«Секретарь» (профиль `ai`)
 

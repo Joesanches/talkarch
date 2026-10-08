@@ -21,6 +21,7 @@ import {
 import type { CallTokenService } from './calls.ts';
 import { ForbiddenError } from './calls.ts';
 import type { Logger } from './events.ts';
+import { roleName } from './labels.ts';
 import type { MatrixApi } from './matrix.ts';
 
 export type AiProfile = 'off' | 'gpu' | 'cpu' | 'external';
@@ -215,18 +216,6 @@ export function protocolBody(draft: ProtocolDraft[typeof MsgType.Report]): strin
   return lines.join('\n');
 }
 
-const roleNames: Record<string, string> = {
-  pathologist: 'патоморфолог',
-  radiologist: 'рентгенолог',
-  attending: 'лечащий врач',
-  lab_tech: 'лаборант',
-  radiographer: 'рентгенолаборант',
-  engineer: 'инженер',
-  head: 'заведующий',
-  external_consultant: 'консультант',
-  on_duty: 'дежурный врач',
-  viewer: 'наблюдатель',
-};
 
 /** Предел содержимого события Matrix — 64 КБ; оставляем запас. */
 const MAX_TRANSCRIPT_BYTES = 40_000;
@@ -418,7 +407,7 @@ export class SecretaryService {
     let model: string | undefined;
     if (this.deps.llm) {
       const transcript = result.segments
-        .map((s) => `[${s.i}] ${s.name}${roles[s.speaker] ? ` (${roleNames[roles[s.speaker]!.role] ?? roles[s.speaker]!.role})` : ''}: ${s.text}`)
+        .map((s) => `[${s.i}] ${s.name}${roles[s.speaker] ? ` (${roleName(roles[s.speaker]!.role)})` : ''}: ${s.text}`)
         .join('\n');
       try {
         // Только стенограмма: сведения о случае подставит система, модели их знать не нужно.
@@ -438,7 +427,7 @@ export class SecretaryService {
       ...(model ? { model } : {}),
       ...(transcriptEventId ? { transcript_event_id: transcriptEventId } : {}),
       meeting: { date: date(result.started_at), start: time(result.started_at), end: time(result.ended_at), form: 'remote' },
-      participants: [...speakers].map(([mxid, name]) => ({ mxid, name, ...(roles[mxid] ? { role: roleNames[roles[mxid]!.role] ?? roles[mxid]!.role } : {}) })),
+      participants: [...speakers].map(([mxid, name]) => ({ mxid, name, ...(roles[mxid] ? { role: roleName(roles[mxid]!.role) } : {}) })),
       case: ctx.success ? { connector: ctx.data.connector, case_id: ctx.data.case_id, title: ctx.data.title, patient: ctx.data.patient.masked } : null,
       sections: sections ?? templateSections(result.segments),
     };

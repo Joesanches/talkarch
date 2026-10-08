@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { NotificationCountType, SyncState, type MatrixClient, type Room } from 'matrix-js-sdk';
-import { FOLDERS, foldersOf, initials, avatarColor, type Folder } from '../model.ts';
-import { CcsError, directRoomIds, openCase, startClient, useClientUpdates, useSyncState, type Session } from '../matrix.ts';
+import { FOLDERS, criticalWaitingFor, foldersOf, initials, avatarColor, type Folder } from '../model.ts';
+import { CcsError, directRoomIds, openCase, roomCriticals, startClient, useClientUpdates, useSyncState, type Session } from '../matrix.ts';
 import { ChatList } from './ChatList.tsx';
 import { CallPanel } from './CallPanel.tsx';
 import { ChatView } from './ChatView.tsx';
@@ -61,6 +61,10 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
     .getVisibleRooms()
     .filter((r) => ['join', 'invite'].includes(r.getMyMembership()))
     .sort((a, b) => b.getLastActiveTimestamp() - a.getLastActiveTimestamp());
+  // Чаты, где критическая находка ждёт моего подтверждения, — наверху списка.
+  // Приглашённые эскалацией видят статус из приглашения (room_prejoin_state).
+  const waits = (r: Room) => (criticalWaitingFor(roomCriticals(r), session.userId).length > 0 ? 1 : 0);
+  rooms.sort((a, b) => waits(b) - waits(a));
   const folderOf = (r: Room) => foldersOf({ roomType: r.getType(), isDirect: direct.has(r.roomId) });
   const unread = (r: Room) => (r.getMyMembership() === 'invite' ? 1 : r.getUnreadNotificationCount(NotificationCountType.Total));
   const counts = new Map<Folder, number>();

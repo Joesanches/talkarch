@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EventType, MsgType, RoomType } from '@konsilium/protocol';
-import { avatarColor, caseCode, foldersOf, formatDay, initials, offsetLabel, preview, reportDecisions, requestViews, type TimelineItem } from './model.ts';
+import { avatarColor, caseCode, countdown, criticalStatuses, criticalWaitingFor, foldersOf, formatDay, initials, offsetLabel, preview, reportDecisions, requestViews, type TimelineItem } from './model.ts';
 
 const item = (eventId: string, type: string, content: Record<string, unknown>, sender = '@smirnova:konsilium.test'): TimelineItem => ({
   eventId,
@@ -113,5 +113,36 @@ describe('reportDecisions', () => {
   it('смещение от начала звонка', () => {
     expect(offsetLabel(0)).toBe('0:00');
     expect(offsetLabel(245.7)).toBe('4:05');
+  });
+});
+
+describe('критические находки', () => {
+  const st = (status: string, recipients: string[], deadline = '2026-10-08T10:10:00Z') => ({
+    status,
+    raised_at: '2026-10-08T10:00:00Z',
+    deadline_at: deadline,
+    recipients,
+    reported_by: '@orlov:x',
+  });
+  it('статус — только от сервиса; меня ждут неподтверждённые, где я адресат, по сроку', () => {
+    const map = criticalStatuses(
+      [
+        { stateKey: '$a', sender: '@ccs:x', content: st('pending', ['@me:x'], '2026-10-08T10:20:00Z') },
+        { stateKey: '$b', sender: '@ccs:x', content: st('pending', ['@me:x', '@other:x']) },
+        { stateKey: '$c', sender: '@ccs:x', content: st('acknowledged', ['@me:x']) },
+        { stateKey: '$d', sender: '@ccs:x', content: st('pending', ['@other:x']) },
+        { stateKey: '$forged', sender: '@me:x', content: st('acknowledged', ['@me:x']) },
+        { stateKey: '$bad', sender: '@ccs:x', content: { status: 'maybe' } },
+      ],
+      '@ccs:x',
+    );
+    expect([...map.keys()]).toEqual(['$a', '$b', '$c', '$d']);
+    expect(criticalWaitingFor(map, '@me:x')).toEqual(['$b', '$a']);
+  });
+
+  it('обратный отсчёт до срока и после', () => {
+    const now = Date.parse('2026-10-08T10:02:17Z');
+    expect(countdown('2026-10-08T10:10:00Z', now)).toEqual({ text: 'осталось 7:43', overdue: false });
+    expect(countdown('2026-10-08T10:00:00Z', now)).toEqual({ text: 'просрочено 2:17', overdue: true });
   });
 });

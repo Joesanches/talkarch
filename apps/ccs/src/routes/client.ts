@@ -70,6 +70,18 @@ export async function clientRoutes(app: FastifyInstance, deps: AppDeps) {
    * Открыть чат случая из РИС/ЛИС: случай → проверка прав в системе-источнике → комната (создаётся при первом обращении)
    * → приглашение пользователя.
    */
+  /**
+   * Сервис уже пустил пользователя в чат случая (эскалация критической находки) — он может открыть чат и по ссылке,
+   * даже если в списках системы-источника его нет. Отозванных это не касается: их выводят из комнаты.
+   */
+  async function invitedByService(ref: CaseRef, userId: string, revoked: string[]): Promise<boolean> {
+    if (revoked.includes(userId)) return false;
+    const roomId = await deps.caseRooms.roomFor(ref);
+    if (!roomId) return false;
+    const m = await deps.matrix.getMembership(roomId, userId).catch(() => null);
+    return m === 'invite' || m === 'join';
+  }
+
   app.post('/cases/open', async (req, reply) => {
     const userId = await currentUser(req);
     if (!userId) return mxError(reply, 401, 'M_UNAUTHORIZED', 'Нужен токен Matrix');
@@ -89,7 +101,7 @@ export async function clientRoutes(app: FastifyInstance, deps: AppDeps) {
     const ref: CaseRef = { connector: connectorId, caseId: body.data.caseId };
     const hostCase = await deps.directory.find(ref);
     if (!hostCase) return mxError(reply, 404, 'M_NOT_FOUND', 'Случай не найден в системе-источнике');
-    if (!(await deps.directory.canAccess(userId, hostCase))) {
+    if (!(await deps.directory.canAccess(userId, hostCase)) && !(await invitedByService(ref, userId, hostCase.revoked))) {
       req.log.warn({ userId, connector: ref.connector }, 'Отказ в доступе к случаю');
       return mxError(reply, 403, 'M_FORBIDDEN', 'Нет доступа к случаю в системе-источнике');
     }

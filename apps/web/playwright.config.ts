@@ -19,6 +19,8 @@ const devEnv = {
   LIVEKIT_API_KEY: 'devkey',
   LIVEKIT_API_SECRET: 'secret',
   STEP_MS: '400',
+  // Сроки критических находок проверяются раз в секунду: эскалация в тесте — за секунды.
+  CRITICAL_TICK_MS: '1000',
   // ИИ-«Секретарь» из профиля ai (infra/docker-compose.yml): агент в Docker, сервис контекста — на хосте.
   ...(process.env.E2E_AI
     ? {

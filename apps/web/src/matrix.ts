@@ -9,8 +9,9 @@ import {
   type MatrixEvent,
   type Room,
 } from 'matrix-js-sdk';
+import { EventType } from '@konsilium/protocol';
 import { config } from './config.ts';
-import type { TimelineItem } from './model.ts';
+import { criticalStatuses, type TimelineItem } from './model.ts';
 
 export interface Session {
   baseUrl: string;
@@ -151,4 +152,13 @@ export async function openCase(
 export async function sessionFromToken(accessToken: string): Promise<Session> {
   const r = await createClient({ baseUrl: config.hsUrl, accessToken }).whoami();
   return { baseUrl: config.hsUrl, userId: r.user_id, accessToken, deviceId: r.device_id ?? '' };
+}
+
+/** Статусы критических находок комнаты: state-события сервиса контекста. */
+export function roomCriticals(room: Room) {
+  const events = (room.currentState.getStateEvents(EventType.CriticalStatus) as MatrixEvent[] | null) ?? [];
+  return criticalStatuses(
+    events.map((e) => ({ stateKey: e.getStateKey() ?? '', sender: e.getSender() ?? '', content: e.getContent() })),
+    room.getCreator(),
+  );
 }

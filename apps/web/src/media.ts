@@ -3,7 +3,8 @@ import { MsgType, KeyImage, type CaseContext } from '@konsilium/protocol';
 import type { KeyImageAttachment, UnreadItem } from '@konsilium/embed/protocol';
 import { EventType, RoomType } from '@konsilium/protocol';
 import { NotificationCountType, type MatrixClient } from 'matrix-js-sdk';
-import { parseCaseContext } from './model.ts';
+import { roomCriticals } from './matrix.ts';
+import { criticalWaitingFor, parseCaseContext } from './model.ts';
 
 /**
  * Медиа Synapse требует авторизацию (authenticated media), поэтому <img src> не подходит:
@@ -64,6 +65,7 @@ export async function sendKeyImage(client: MatrixClient, roomId: string, att: Ke
 /** Непрочитанное по чатам случаев. Приглашения считаются новыми чатами (контекст в них — из room_prejoin_state). */
 export function caseUnread(client: MatrixClient): Array<UnreadItem & { roomId: string }> {
   const out: Array<UnreadItem & { roomId: string }> = [];
+  const me = client.getUserId();
   for (const room of client.getRooms()) {
     const membership = room.getMyMembership();
     if ((membership !== 'join' && membership !== 'invite') || room.getType() !== RoomType.Case) continue;
@@ -75,6 +77,7 @@ export function caseUnread(client: MatrixClient): Array<UnreadItem & { roomId: s
       caseId: ctx.case_id,
       unread: membership === 'invite' ? 0 : room.getUnreadNotificationCount(NotificationCountType.Total),
       invited: membership === 'invite',
+      critical: me ? criticalWaitingFor(roomCriticals(room), me).length : 0,
     });
   }
   return out;

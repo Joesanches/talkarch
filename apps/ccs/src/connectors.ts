@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
-import { ConnectorId, SourceSystem } from '@konsilium/protocol';
+import { ConnectorId, IsoDuration, SourceSystem } from '@konsilium/protocol';
 import type { UserRef } from '@konsilium/protocol/integration';
 
 /**
@@ -21,6 +21,19 @@ export const ConnectorConfig = z.object({
       url: z.string().url(),
       token: z.string().min(16),
       timeout_ms: z.number().int().positive().default(3000),
+    })
+    .optional(),
+  /**
+   * Критические находки: срок подтверждения и план эскалации по умолчанию — для находок из чата
+   * и для событий `critical.raised` без своего плана. `users` — логины (в продукте — график дежурств).
+   */
+  critical: z
+    .object({
+      ack_deadline: IsoDuration.default('PT10M'),
+      escalation: z
+        .array(z.object({ after: IsoDuration, action: z.enum(['notify', 'call']), target: z.string().min(1), users: z.array(z.string().min(1)).default([]) }))
+        .max(5)
+        .default([]),
     })
     .optional(),
   /** Как сопоставлять пользователей системы с Matrix ID. В PoC — логин = локальная часть Matrix ID. */

@@ -1,5 +1,6 @@
 import { CaseContext, EventType, MsgType, RequestMessage, type RequestStatusContent } from '@konsilium/protocol';
 import type { CaseDirectory } from './cases.ts';
+import type { CriticalService } from './critical.ts';
 import type { UserResolver } from './connectors.ts';
 import { HostError } from './host.ts';
 import { isTransient } from './integration.ts';
@@ -29,20 +30,22 @@ export class RetryLaterError extends Error {}
 
 /**
  * Обработка событий из транзакций Application Service.
- * Сейчас: заявка в чате случая → обратный вызов в систему-источник → статус обратно в чат.
+ * Заявка в чате случая → обратный вызов в систему-источник → статус обратно в чат.
+ * Критическая находка и подтверждение её получения → CriticalService.
  */
 export class EventProcessor {
   private readonly done = new Set<string>();
 
   constructor(
-    private readonly deps: { matrix: MatrixApi; directory: CaseDirectory; requests: RequestStore; users: UserResolver; log: Logger },
+    private readonly deps: { matrix: MatrixApi; directory: CaseDirectory; requests: RequestStore; users: UserResolver; critical: CriticalService; log: Logger },
   ) {}
 
   async handle(event: MatrixEvent): Promise<void> {
     if (this.done.has(event.event_id)) return;
-    if (event.sender !== this.deps.matrix.botUserId && event.type === 'm.room.message' && event.content.msgtype === MsgType.Request) {
-      await this.onRequest(event);
-    }
+    const fromUser = event.sender !== this.deps.matrix.botUserId;
+    if (fromUser && event.type === 'm.room.message' && event.content.msgtype === MsgType.Request) await this.onRequest(event);
+    if (fromUser && event.type === 'm.room.message' && event.content.msgtype === MsgType.Critical) await this.deps.critical.onMessage(event);
+    if (fromUser && event.type === EventType.Ack) await this.deps.critical.onAck(event);
     // Отмечаем только после успешной обработки: при повторе транзакции событие обработается снова.
     this.done.add(event.event_id);
     if (this.done.size > 10_000) {

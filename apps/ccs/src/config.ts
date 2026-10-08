@@ -33,6 +33,8 @@ const Env = z.object({
   LLM_URL: z.string().url().optional(),
   LLM_MODEL: z.string().min(1).optional(),
   LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
+  /** Как часто проверять сроки критических находок (мс): точность эскалации. */
+  CRITICAL_TICK_MS: z.coerce.number().int().nonnegative().default(5000),
 });
 
 export type Config = {
@@ -49,6 +51,8 @@ export type Config = {
   databaseUrl?: string;
   chatWebUrl: string;
   livekit: { url: string; apiKey: string; apiSecret: string; internalUrl?: string };
+  /** 0 — таймер не запускается (модульные тесты вызывают tick сами). */
+  criticalTickMs: number;
   ai: {
     profile: 'off' | 'gpu' | 'cpu' | 'external';
     secretaryUrl: string | null;
@@ -76,6 +80,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     databaseUrl: e.DATABASE_URL,
     chatWebUrl: e.CHAT_WEB_URL.replace(/\/$/, ''),
     livekit: { url: e.LIVEKIT_URL, apiKey: e.LIVEKIT_API_KEY, apiSecret: e.LIVEKIT_API_SECRET, ...(e.LIVEKIT_INTERNAL_URL ? { internalUrl: e.LIVEKIT_INTERNAL_URL } : {}) },
+    criticalTickMs: e.CRITICAL_TICK_MS,
     ai: {
       profile: e.AI_PROFILE ?? (e.SECRETARY_URL ? 'cpu' : 'off'),
       secretaryUrl: e.SECRETARY_URL?.replace(/\/$/, '') ?? null,

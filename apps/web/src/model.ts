@@ -1,7 +1,17 @@
 /**
  * Чистые функции модели клиента: папки, карточки заявок, подписи. Без React и matrix-js-sdk — их легко тестировать.
  */
-import { CaseContext, CaseRole, EventType, MsgType, NotificationField, NotificationInfo, RoomType, type RequestStep } from '@konsilium/protocol';
+import {
+  CaseContext,
+  CaseRole,
+  CriticalStatusContent,
+  EventType,
+  MsgType,
+  NotificationField,
+  NotificationInfo,
+  RoomType,
+  type RequestStep,
+} from '@konsilium/protocol';
 
 export type Folder = 'all' | 'cases' | 'direct' | 'channels' | 'service';
 
@@ -151,6 +161,7 @@ export const formatDue = (iso: string) => `до ${short.format(new Date(iso))}, 
 export function preview(e: TimelineItem | undefined, senderName: string, isMine: boolean): string {
   if (!e) return '';
   if (e.type === EventType.RequestStatus) return `Заявка ${e.content.external_id ?? ''}: ${stepLabel(e.content.status as RequestStep).toLowerCase()}`;
+  if (e.type === 'm.room.message' && e.content.msgtype === MsgType.Critical) return `Критическая находка: ${String((e.content[MsgType.Critical] as { finding?: string } | undefined)?.finding ?? '')}`;
   if (e.type === EventType.ReportStatus) return e.content.status === 'accepted' ? 'Черновик протокола принят' : 'Черновик протокола отклонён';
   if (e.type !== 'm.room.message') return '';
   const body = String(e.content.body ?? '').split('\n')[0] ?? '';
@@ -282,4 +293,47 @@ export function reportDecisions(items: TimelineItem[]): Map<string, ReportDecisi
 export function offsetLabel(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/** Кто может отправить критическую находку (так же проверяет сервис контекста). */
+export const CRITICAL_REPORTER_ROLES: ReadonlySet<string> = new Set(['radiologist', 'pathologist', 'head']);
+
+/**
+ * Статусы критических находок комнаты (state `ru.vendor.critical.status`, ключ — ID находки).
+ * Принимаются только от создателя комнаты — сервиса контекста: подтверждение от остальных ничего не значит.
+ */
+export function criticalStatuses(states: Array<{ stateKey: string; sender: string; content: unknown }>, service: string | null): Map<string, CriticalStatusContent> {
+  const out = new Map<string, CriticalStatusContent>();
+  for (const s of states) {
+    if (!service || s.sender !== service) continue;
+    const parsed = CriticalStatusContent.safeParse(s.content);
+    if (parsed.success) out.set(s.stateKey, parsed.data);
+  }
+  return out;
+}
+
+/** Неподтверждённые находки, которые ждут именно меня. */
+export function criticalWaitingFor(statuses: Map<string, CriticalStatusContent>, me: string): string[] {
+  return [...statuses.entries()]
+    .filter(([, s]) => s.status === 'pending' && s.recipients.includes(me))
+    .sort(([, a], [, b]) => Date.parse(a.deadline_at) - Date.parse(b.deadline_at))
+    .map(([id]) => id);
+}
+
+/** Обратный отсчёт до срока: «осталось 7:43» или «просрочено 2:10». */
+export function countdown(deadlineIso: string, now = Date.now()): { text: string; overdue: boolean } {
+  const ms = Date.parse(deadlineIso) - now;
+  const total = Math.floor(Math.abs(ms) / 1000);
+  const mm = Math.floor(total / 60);
+  const ss = String(total % 60).padStart(2, '0');
+  return ms >= 0 ? { text: `осталось ${mm}:${ss}`, overdue: false } : { text: `просрочено ${mm}:${ss}`, overdue: true };
+}
+
+/** «45 с», «2 мин 13 с», «1 ч 5 мин». */
+export function delayLabel(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s} с`;
+  if (s < 3600) return s % 60 ? `${Math.floor(s / 60)} мин ${s % 60} с` : `${s / 60} мин`;
+  const m = Math.round((s % 3600) / 60);
+  return m ? `${Math.floor(s / 3600)} ч ${m} мин` : `${Math.floor(s / 3600)} ч`;
 }

@@ -5,7 +5,8 @@
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { HostCase } from '../../src/cases.ts';
-import { PgCaseRegistry, PgCaseRoomStore, PgProcessedEvents, PgRequestStore, createPool, ensureDatabase, migrate } from '../../src/db.ts';
+import type { CriticalFinding } from '../../src/critical.ts';
+import { PgCaseRegistry, PgCaseRoomStore, PgCriticalStore, PgProcessedEvents, PgRequestStore, createPool, ensureDatabase, migrate } from '../../src/db.ts';
 
 const ADMIN = process.env.IT_PG_URL ?? 'postgres://synapse:synapse-dev@localhost:55432/postgres';
 const DB = `ccs_it_db_${Date.now()}`;
@@ -36,7 +37,7 @@ describe('Хранилище сервиса контекста в PostgreSQL', (
   beforeAll(async () => {
     await ensureDatabase(url, silent);
     pool = createPool(url);
-    expect(await migrate(pool)).toBe(1);
+    expect(await migrate(pool)).toBe(2);
     expect(await migrate(pool)).toBe(0); // повторный запуск ничего не делает
   });
 
@@ -86,5 +87,45 @@ describe('Хранилище сервиса контекста в PostgreSQL', (
     await pool.query(`update integration_events set processed_at = now() - interval '8 days' where event_id = 'e1'`);
     expect(await processed.prune()).toBe(1);
     expect(await processed.has('lis', 'e1')).toBe(false);
+  });
+
+  it('критические находки: дубли, аренда шагов при параллельной проверке, подтверждение — ровно одно', async () => {
+    const store = new PgCriticalStore(pool);
+    const t0 = Date.parse('2026-10-08T10:00:00Z');
+    const f: CriticalFinding = {
+      eventId: '$crit1',
+      roomId: '!room:konsilium.test',
+      connector: 'ris',
+      caseId: 'A26-118734',
+      hostFindingId: 'КН-1',
+      reportedBy: '@orlov:konsilium.test',
+      raisedAt: t0,
+      deadlineAt: t0 + 600_000,
+      recipients: ['@melnikova:konsilium.test'],
+      plan: [{ afterS: 600, action: 'call', target: 'Пост', users: [] }],
+      escalations: [],
+      status: 'pending',
+      nextAt: t0 + 600_000,
+    };
+    expect(await store.add(f)).toBe(true);
+    expect(await store.add(f)).toBe(false);
+    expect(await store.add({ ...f, eventId: '$crit2' })).toBe(false); // тот же номер находки РИС
+    expect(await store.byHostId('ris', 'КН-1')).toMatchObject({ eventId: '$crit1', recipients: ['@melnikova:konsilium.test'] });
+
+    // Два экземпляра сервиса проверяют сроки одновременно — шаг достаётся одному.
+    const due = t0 + 600_000;
+    const claims = await Promise.all([store.claimDue(due, 60_000, 10), store.claimDue(due, 60_000, 10)]);
+    expect(claims.map((c) => c.length).sort()).toEqual([0, 1]);
+    expect(await store.recordEscalation('$crit1', { step: 1, at: due, action: 'call', target: 'Пост', users: [] }, f.recipients, null)).toBe(true);
+    expect((await store.get('$crit1'))?.escalations).toHaveLength(1);
+
+    const acks = await Promise.all([
+      store.acknowledge('$crit1', '@melnikova:konsilium.test', due + 1000),
+      store.acknowledge('$crit1', '@gusev:konsilium.test', due + 1000),
+    ]);
+    expect(acks.filter(Boolean)).toHaveLength(1);
+    expect(await store.recordEscalation('$crit1', { step: 2, at: due, action: 'notify', target: 'head', users: [] }, [], null)).toBe(false);
+    const [listed] = await store.list('ris', t0);
+    expect(listed).toMatchObject({ status: 'acknowledged', ackAt: due + 1000, nextAt: null });
   });
 });

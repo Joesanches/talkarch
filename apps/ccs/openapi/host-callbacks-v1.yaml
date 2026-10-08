@@ -127,6 +127,37 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /critical-findings/events:
+    post:
+      operationId: postCriticalFindingEvent
+      summary: Событие критической находки — в журнал системы-источника
+      description: |
+        Жизненный цикл находки для журнала и отчётов системы-источника:
+
+        | `type` | Когда | Что сделать |
+        |---|---|---|
+        | `raised` | Врач отправил находку в чате случая | Зафиксировать в карточке случая (текст, автор, адресаты, срок) |
+        | `escalated` | Нет подтверждения — шаг плана | Для `action: call` — позвонить на пост `target` (телефония системы-источника); для `notify` — записать |
+        | `acknowledged` | Адресат подтвердил получение | Зафиксировать кто и через сколько |
+
+        Для находок из `critical.raised` приходит `host_finding_id`. Повтор с тем же `Idempotency-Key` — без повторного действия.
+        Ответ `2xx` без тела; при ошибке сервис повторит вызов.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+          description: '`{finding_id}:{type}:{шаг}`'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CriticalFindingEvent' }
+            examples:
+              acknowledged: { $ref: '#/components/examples/CriticalFindingEvent' }
+      responses:
+        '202': { description: Принято }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 components:
   securitySchemes:
     serviceToken:
@@ -213,7 +244,39 @@ components:
         display_name: { type: string, maxLength: 200 }
         birth_date: { type: string, format: date }
         mrn: { type: string, maxLength: 64, description: Номер медицинской карты }
+    CriticalFindingEvent:
+      type: object
+      required: [type, finding_id, case_id, at]
+      properties:
+        type: { type: string, enum: [raised, escalated, acknowledged] }
+        finding_id: { type: string, description: 'ID находки в «Консилиуме»' }
+        host_finding_id: { type: string, description: 'Номер в системе-источнике, если находка пришла оттуда' }
+        case_id: { type: string }
+        at: { type: string, format: date-time }
+        finding: { type: string, maxLength: 1000, description: '`raised`: текст находки' }
+        reported_by: { $ref: './integration-v1.yaml#/components/schemas/UserRef' }
+        recipients: { type: array, items: { $ref: './integration-v1.yaml#/components/schemas/UserRef' } }
+        deadline_at: { type: string, format: date-time }
+        escalation:
+          type: object
+          description: '`escalated`: шаг плана'
+          required: [step, action, target]
+          properties:
+            step: { type: integer, minimum: 1 }
+            action: { type: string, enum: [notify, call] }
+            target: { type: string }
+            users: { type: array, items: { $ref: './integration-v1.yaml#/components/schemas/UserRef' } }
+        acknowledged_by: { $ref: './integration-v1.yaml#/components/schemas/UserRef' }
+        seconds_to_ack: { type: integer, minimum: 0 }
   examples:
+    CriticalFindingEvent:
+      value:
+        type: acknowledged
+        finding_id: '$8yq0N2aRk5m3Jd7c1Wf0vXo4lE9sP6tB2uZ1hQyG3n'
+        case_id: Г26-04512
+        at: '2026-10-08T10:02:13Z'
+        acknowledged_by: { mxid: '@kolesnikov:chat.clinic.local', login: kolesnikov }
+        seconds_to_ack: 133
     CaseSnapshot:
       value:
         case_id: Г26-04530

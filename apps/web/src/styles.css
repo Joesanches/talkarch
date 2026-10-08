@@ -1237,3 +1237,116 @@ button:disabled {
   flex-wrap: wrap;
   margin-top: 4px;
 }
+
+/* ── Критические находки ───────────────────────────────────────────── */
+.critical {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  margin: 2px -4px;
+  border-radius: 10px;
+  border: 1px solid var(--color-semantic-critical-border);
+  background: var(--color-semantic-critical-soft);
+}
+.critical.done {
+  border-color: var(--color-neutral-border);
+  background: var(--color-neutral-surface-muted);
+}
+.critical-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--color-semantic-critical-text);
+}
+.critical.done .critical-head {
+  color: var(--color-neutral-text-secondary);
+}
+.critical-mark {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  color: #fff;
+  background: var(--color-semantic-critical);
+}
+.critical.done .critical-mark {
+  background: var(--color-semantic-success-text);
+}
+.critical-finding {
+  font-size: 15px;
+  font-weight: 600;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.critical-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.critical-timer {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--color-neutral-text);
+}
+.critical-timer.overdue {
+  color: var(--color-semantic-critical-text);
+}
+.critical-escalations {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--color-neutral-text-secondary);
+}
+.critical-ack.large {
+  justify-self: stretch;
+  padding: 10px 16px;
+  font-size: 15px;
+}
+.primary.danger,
+.critical-ack {
+  background: var(--color-semantic-danger-button);
+}
+.critical-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--color-semantic-critical-soft);
+  border-bottom: 1px solid var(--color-semantic-critical-border);
+}
+.critical-bar-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+.critical-bar-text b {
+  color: var(--color-semantic-critical-text);
+  font-size: 13px;
+}
+.critical-bar-text span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.badge.badge-critical {
+  background: var(--color-semantic-critical);
+}
+.room.has-critical .room-name {
+  color: var(--color-semantic-critical-text);
+}
+@media (max-width: 760px) {
+  .critical-bar {
+    flex-wrap: wrap;
+  }
+  .critical-bar .critical-ack {
+    flex: 1 0 100%;
+  }
+}

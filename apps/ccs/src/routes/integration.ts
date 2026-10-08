@@ -88,6 +88,17 @@ export async function integrationRoutes(app: FastifyInstance, deps: AppDeps) {
     return { results };
   });
 
+  /**
+   * Критические находки подключения с даты `since` (по умолчанию — за 7 дней): время подтверждения, эскалации.
+   * Для РИС/ЛИС без обратных вызовов это способ узнать о подтверждении; для всех — отчёт.
+   */
+  app.get('/critical-findings', async (req, reply) => {
+    const { since } = req.query as { since?: string };
+    const from = since ? Date.parse(since) : Date.now() - 7 * 86_400_000;
+    if (!Number.isFinite(from)) return problem(reply, 400, 'Некорректный параметр since', 'Ожидается дата и время ISO 8601');
+    return { findings: await deps.critical.report(req.connector!.id, from) };
+  });
+
   /** Есть ли чат по случаю, и ссылка на него. */
   app.get('/cases/:caseId/chat', async (req) => {
     const { caseId } = req.params as { caseId: string };

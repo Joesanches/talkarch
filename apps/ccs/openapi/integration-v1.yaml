@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: «Консилиум» — API интеграции для РИС, ЛИС и ТМК
   version: 1.0.0-poc
-  summary: Система-источник сообщает сервису контекста о случаях, заявках и уведомлениях.
+  summary: Система-источник сообщает сервису контекста о случаях, заявках, уведомлениях и критических находках.
   description: |
     Это API вызывает **система-источник** (РИС, ЛИС, ТМК). Обратное направление — вызовы из сервиса контекста
     в систему-источник — описано в `host-callbacks-v1.yaml`.
@@ -26,7 +26,9 @@ security:
   - connectorToken: []
 tags:
   - name: События
-    description: Случаи, статусы заявок и уведомления из системы-источника
+    description: Случаи, статусы заявок, уведомления и критические находки из системы-источника
+  - name: Критические находки
+    description: Время подтверждения и эскалации — отчёт и способ узнать итог без обратных вызовов
   - name: Чаты случаев
     description: Есть ли чат по случаю; создание чата по запросу системы-источника
   - name: Служебное
@@ -75,6 +77,7 @@ paths:
               caseUpserted: { $ref: '#/components/examples/CaseUpserted' }
               requestStatusChanged: { $ref: '#/components/examples/RequestStatusChanged' }
               notificationPosted: { $ref: '#/components/examples/NotificationPosted' }
+              criticalRaised: { $ref: '#/components/examples/CriticalRaised' }
           application/json:
             schema:
               oneOf:
@@ -104,6 +107,34 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/EventsResponse' }
+  /critical-findings:
+    get:
+      tags: [Критические находки]
+      operationId: listCriticalFindings
+      summary: Критические находки подключения — статус, время подтверждения, эскалации
+      description: |
+        Находки из `critical.raised` этого подключения и находки, отправленные в чатах его случаев.
+        Для РИС/ЛИС уровня 1 (без обратных вызовов) — способ узнать о подтверждении; для всех — отчёт
+        по времени подтверждения. Текста находки в ответе нет: он хранится в чате случая.
+      parameters:
+        - name: since
+          in: query
+          description: Находки, отправленные начиная с этого момента. По умолчанию — за последние 7 дней.
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Находки по времени отправки
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CriticalFindingsResponse' }
+              examples:
+                report: { $ref: '#/components/examples/CriticalFindingsResponse' }
+        '400':
+          description: Некорректный `since`
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /cases/{caseId}/chat:
     parameters:
       - $ref: '#/components/parameters/CaseId'
@@ -319,6 +350,77 @@ components:
           type: boolean
           default: false
           description: Создать чат, если его нет. По умолчанию уведомление по случаю без чата игнорируется.
+    IsoDuration:
+      type: string
+      pattern: '^PT(\d+M)?(\d+S)?$'
+      description: Длительность ISO 8601 в минутах и секундах — `PT10M`, `PT90S`, `PT1M30S`
+      examples: [PT10M]
+    CriticalRaised:
+      type: object
+      required: [case_id, finding_id, finding, reported_by, recipient]
+      description: |
+        Критическая находка. Сервис создаёт чат случая (если его нет), публикует находку от имени сервиса с указанием автора,
+        приглашает адресатов и ведёт срок подтверждения. Подтвердить получение может только адресат или подключённый эскалацией.
+        Итог — обратным вызовом `POST /critical-findings/events` (уровень 2) и в `GET /critical-findings`.
+      properties:
+        case_id: { type: string }
+        finding_id: { type: string, maxLength: 128, description: 'Номер находки в системе-источнике; повтор с тем же номером — `duplicate`' }
+        finding: { type: string, minLength: 1, maxLength: 1000, description: 'Суть находки, без ФИО пациента' }
+        reported_by: { $ref: '#/components/schemas/UserRef' }
+        recipient:
+          type: object
+          description: Роль адресата в случае и/или конкретные люди; нужно хотя бы одно
+          properties:
+            role: { $ref: '#/components/schemas/CaseRole' }
+            users: { type: array, maxItems: 10, items: { $ref: '#/components/schemas/UserRef' } }
+        ack_deadline: { allOf: [{ $ref: '#/components/schemas/IsoDuration' }], default: PT10M }
+        escalation:
+          type: array
+          maxItems: 5
+          description: 'План эскалации; не задан — план подключения по умолчанию. `after` — от момента отправки.'
+          items:
+            type: object
+            required: [after, action, target]
+            properties:
+              after: { $ref: '#/components/schemas/IsoDuration' }
+              action:
+                type: string
+                enum: [notify, call]
+                description: '`notify` — подключить к чату и уведомить; `call` — звонок на пост (выполняет система-источник по обратному вызову)'
+              target: { type: string, maxLength: 200, description: 'Роль в случае (`head`) или название поста' }
+              users: { type: array, maxItems: 20, items: { $ref: '#/components/schemas/UserRef' } }
+    CriticalFindingSummary:
+      type: object
+      required: [finding_id, case_id, status, raised_at, deadline_at, reported_by, overdue, escalations]
+      properties:
+        finding_id: { type: string, description: 'ID находки в «Консилиуме»' }
+        host_finding_id: { type: string, description: 'Номер в системе-источнике, если находка пришла оттуда' }
+        case_id: { type: string }
+        status: { type: string, enum: [pending, acknowledged] }
+        raised_at: { type: string, format: date-time }
+        deadline_at: { type: string, format: date-time }
+        reported_by: { $ref: '#/components/schemas/UserRef' }
+        acknowledged_by: { $ref: '#/components/schemas/UserRef' }
+        acknowledged_at: { type: string, format: date-time }
+        seconds_to_ack: { type: integer, minimum: 0 }
+        overdue: { type: boolean, description: 'Подтверждена позже срока (или срок истёк, а подтверждения нет)' }
+        escalations:
+          type: array
+          items:
+            type: object
+            required: [step, at, action, target]
+            properties:
+              step: { type: integer, minimum: 1 }
+              at: { type: string, format: date-time }
+              action: { type: string, enum: [notify, call] }
+              target: { type: string }
+    CriticalFindingsResponse:
+      type: object
+      required: [findings]
+      properties:
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/CriticalFindingSummary' }
     EventBase:
       type: object
       description: Конверт CloudEvents 1.0 (структурированный режим). Расширения CloudEvents (например, `traceparent`) допускаются.
@@ -352,17 +454,26 @@ components:
           properties:
             type: { const: ru.vendor.notification.posted }
             data: { $ref: '#/components/schemas/NotificationPosted' }
+    CriticalRaisedEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventBase'
+        - type: object
+          properties:
+            type: { const: ru.vendor.critical.raised }
+            data: { $ref: '#/components/schemas/CriticalRaised' }
     Event:
       oneOf:
         - $ref: '#/components/schemas/CaseUpsertedEvent'
         - $ref: '#/components/schemas/RequestStatusChangedEvent'
         - $ref: '#/components/schemas/NotificationPostedEvent'
+        - $ref: '#/components/schemas/CriticalRaisedEvent'
       discriminator:
         propertyName: type
         mapping:
           ru.vendor.case.upserted: '#/components/schemas/CaseUpsertedEvent'
           ru.vendor.request.status.changed: '#/components/schemas/RequestStatusChangedEvent'
           ru.vendor.notification.posted: '#/components/schemas/NotificationPostedEvent'
+          ru.vendor.critical.raised: '#/components/schemas/CriticalRaisedEvent'
     EventBatch:
       type: array
       minItems: 1
@@ -461,6 +572,40 @@ components:
           text: Готовы препараты ИГХ, стёкла отсканированы
           category: ready
           links: [{ label: Открыть в ЛИС, url: https://lis.clinic.local/cases/G26-04512 }]
+    CriticalRaised:
+      summary: Критическая находка из РИС дежурному врачу с эскалацией
+      value:
+        specversion: '1.0'
+        id: ris:crit:КН-2611
+        source: ris
+        type: ru.vendor.critical.raised
+        subject: A26-118734
+        data:
+          case_id: A26-118734
+          finding_id: КН-2611
+          finding: 'Двусторонняя ТЭЛА: долевые и сегментарные ветви'
+          reported_by: { login: orlov }
+          recipient: { role: on_duty }
+          ack_deadline: PT10M
+          escalation:
+            - { after: PT10M, action: call, target: Пост 2 терапии }
+            - { after: PT20M, action: notify, target: head, users: [{ login: belova }] }
+    CriticalFindingsResponse:
+      value:
+        findings:
+          - finding_id: '$8yq0N2aRk5m3Jd7c1Wf0vXo4lE9sP6tB2uZ1hQyG3n'
+            host_finding_id: КН-2611
+            case_id: A26-118734
+            status: acknowledged
+            raised_at: '2026-10-08T10:00:00Z'
+            deadline_at: '2026-10-08T10:10:00Z'
+            reported_by: { login: orlov }
+            acknowledged_by: { login: melnikova }
+            acknowledged_at: '2026-10-08T10:12:30Z'
+            seconds_to_ack: 750
+            overdue: true
+            escalations:
+              - { step: 1, at: '2026-10-08T10:10:00Z', action: call, target: Пост 2 терапии }
     Batch:
       summary: Пакет из двух событий
       value:

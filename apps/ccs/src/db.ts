@@ -6,6 +6,7 @@ import pg from 'pg';
 import { caseKey, type CaseRef } from '@konsilium/protocol';
 import type { CaseRegistry, HostCase } from './cases.ts';
 import type { CaseRoomStore } from './caseRooms.ts';
+import type { CriticalFinding, CriticalStore, Escalation } from './critical.ts';
 import type { Logger } from './events.ts';
 import type { ProcessedEvents } from './integration.ts';
 import type { RequestStore, TrackedRequest } from './requests.ts';
@@ -43,6 +44,27 @@ const MIGRATIONS: string[] = [
      primary key (connector, event_id)
    );
    create index integration_events_processed_at on integration_events (processed_at);`,
+  // Критические находки: без текста находки (он в чате) — адресаты, сроки, журнал эскалаций и подтверждения.
+  `create table critical_findings (
+     event_id text primary key,
+     room_id text not null,
+     connector text not null,
+     case_id text not null,
+     host_finding_id text,
+     reported_by text not null,
+     raised_at timestamptz not null,
+     deadline_at timestamptz not null,
+     recipients jsonb not null,
+     plan jsonb not null,
+     escalations jsonb not null default '[]',
+     status text not null,
+     ack_by text,
+     ack_at timestamptz,
+     next_at timestamptz
+   );
+   create unique index critical_findings_host on critical_findings (connector, host_finding_id) where host_finding_id is not null;
+   create index critical_findings_due on critical_findings (next_at) where status = 'pending' and next_at is not null;
+   create index critical_findings_connector on critical_findings (connector, raised_at);`,
 ];
 
 export function createPool(url: string): pg.Pool {
@@ -191,5 +213,116 @@ export class PgProcessedEvents implements ProcessedEvents {
   async prune(days = 7): Promise<number> {
     const r = await this.pool.query(`delete from integration_events where processed_at < now() - make_interval(days => $1)`, [days]);
     return r.rowCount ?? 0;
+  }
+}
+
+interface CriticalRow {
+  event_id: string;
+  room_id: string;
+  connector: string;
+  case_id: string;
+  host_finding_id: string | null;
+  reported_by: string;
+  raised_at: Date;
+  deadline_at: Date;
+  recipients: string[];
+  plan: CriticalFinding['plan'];
+  escalations: Escalation[];
+  status: CriticalFinding['status'];
+  ack_by: string | null;
+  ack_at: Date | null;
+  next_at: Date | null;
+}
+
+const toFinding = (r: CriticalRow): CriticalFinding => ({
+  eventId: r.event_id,
+  roomId: r.room_id,
+  connector: r.connector,
+  caseId: r.case_id,
+  ...(r.host_finding_id ? { hostFindingId: r.host_finding_id } : {}),
+  reportedBy: r.reported_by,
+  raisedAt: r.raised_at.getTime(),
+  deadlineAt: r.deadline_at.getTime(),
+  recipients: r.recipients,
+  plan: r.plan,
+  escalations: r.escalations,
+  status: r.status,
+  ...(r.ack_by ? { ackBy: r.ack_by } : {}),
+  ...(r.ack_at ? { ackAt: r.ack_at.getTime() } : {}),
+  nextAt: r.next_at ? r.next_at.getTime() : null,
+});
+
+const ts = (ms: number | null | undefined) => (ms === null || ms === undefined ? null : new Date(ms));
+
+export class PgCriticalStore implements CriticalStore {
+  constructor(private readonly pool: pg.Pool) {}
+
+  async add(f: CriticalFinding): Promise<boolean> {
+    const r = await this.pool.query(
+      `insert into critical_findings (event_id, room_id, connector, case_id, host_finding_id, reported_by, raised_at, deadline_at, recipients, plan, escalations, status, next_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) on conflict do nothing`,
+      [
+        f.eventId,
+        f.roomId,
+        f.connector,
+        f.caseId,
+        f.hostFindingId ?? null,
+        f.reportedBy,
+        ts(f.raisedAt),
+        ts(f.deadlineAt),
+        JSON.stringify(f.recipients),
+        JSON.stringify(f.plan),
+        JSON.stringify(f.escalations),
+        f.status,
+        ts(f.nextAt),
+      ],
+    );
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  async get(eventId: string): Promise<CriticalFinding | null> {
+    const r = await this.pool.query<CriticalRow>('select * from critical_findings where event_id = $1', [eventId]);
+    return r.rows[0] ? toFinding(r.rows[0]) : null;
+  }
+
+  async byHostId(connector: string, hostFindingId: string): Promise<CriticalFinding | null> {
+    const r = await this.pool.query<CriticalRow>('select * from critical_findings where connector = $1 and host_finding_id = $2', [connector, hostFindingId]);
+    return r.rows[0] ? toFinding(r.rows[0]) : null;
+  }
+
+  /** Аренда: next_at сдвигается вперёд в той же команде — параллельный экземпляр эти строки пропустит. */
+  async claimDue(now: number, leaseMs: number, limit: number): Promise<CriticalFinding[]> {
+    const r = await this.pool.query<CriticalRow>(
+      `update critical_findings set next_at = $2 where event_id in (
+         select event_id from critical_findings where status = 'pending' and next_at <= $1 order by next_at limit $3 for update skip locked
+       ) returning *`,
+      [ts(now), ts(now + leaseMs), limit],
+    );
+    return r.rows.map(toFinding);
+  }
+
+  async recordEscalation(eventId: string, escalation: Escalation, recipients: string[], nextAt: number | null): Promise<boolean> {
+    const r = await this.pool.query(
+      `update critical_findings set escalations = escalations || $2::jsonb, recipients = $3, next_at = $4 where event_id = $1 and status = 'pending'`,
+      [eventId, JSON.stringify([escalation]), JSON.stringify(recipients), ts(nextAt)],
+    );
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  async clearNext(eventId: string): Promise<void> {
+    await this.pool.query('update critical_findings set next_at = null where event_id = $1', [eventId]);
+  }
+
+  async acknowledge(eventId: string, by: string, at: number): Promise<CriticalFinding | null> {
+    const r = await this.pool.query<CriticalRow>(
+      `update critical_findings set status = 'acknowledged', ack_by = $2, ack_at = $3, next_at = null where event_id = $1 and status = 'pending' returning *`,
+      [eventId, by, ts(at)],
+    );
+    return r.rows[0] ? toFinding(r.rows[0]) : null;
+  }
+
+  async list(connector: string, since: number): Promise<CriticalFinding[]> {
+    const r = await this.pool.query<CriticalRow>('select * from critical_findings where connector = $1 and raised_at >= $2 order by raised_at', [connector, ts(since)]);
+    return r.rows.map(toFinding);
   }
 }

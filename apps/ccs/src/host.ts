@@ -5,6 +5,7 @@ import {
   CreateRequestResponse,
   PatientRevealResponse,
   type AccessCheckRequest,
+  type CriticalFindingEvent,
   type CreateRequestRequest,
   type PatientRevealRequest,
 } from '@konsilium/protocol/integration';
@@ -19,6 +20,8 @@ export interface HostCallbacks {
   checkAccess(req: AccessCheckRequest): Promise<AccessCheckResponse>;
   createRequest(req: CreateRequestRequest, idempotencyKey: string): Promise<CreateRequestResponse>;
   revealPatient(req: PatientRevealRequest): Promise<PatientRevealResponse>;
+  /** Жизненный цикл критической находки — в журнал системы-источника. Повтор с тем же ключом безопасен. */
+  criticalEvent(event: CriticalFindingEvent, idempotencyKey: string): Promise<void>;
 }
 
 /** Ошибка обратного вызова. `transient` — стоит повторить позже (сеть, 5xx, 429, тайм-аут). */
@@ -60,11 +63,23 @@ export class HttpHostCallbacks implements HostCallbacks {
     if (!res.ok) {
       throw new HostError(res.status, `Система-источник ответила ${res.status}`, res.status >= 500 || res.status === 429);
     }
-    const parsed = schema.safeParse(await res.json().catch(() => undefined));
+    const text = await res.text();
+    let json: unknown;
+    try {
+      json = text ? JSON.parse(text) : undefined;
+    } catch {
+      json = undefined;
+    }
+    const parsed = schema.safeParse(json);
     if (!parsed.success) {
       throw new HostError(res.status, `Ответ системы-источника не по контракту: ${parsed.error.issues.map((i) => i.path.join('.') + ' ' + i.message).join('; ')}`, false);
     }
     return parsed.data;
+  }
+
+  async criticalEvent(event: CriticalFindingEvent, idempotencyKey: string): Promise<void> {
+    // Ответ без тела (202/204) — достаточно кода.
+    await this.call('POST', '/critical-findings/events', z.unknown(), event, { 'idempotency-key': idempotencyKey });
   }
 
   async getCase(caseId: string): Promise<CaseSnapshot | null> {

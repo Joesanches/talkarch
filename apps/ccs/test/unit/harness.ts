@@ -31,6 +31,7 @@ export const testConfig: Config = {
   connectorsFile: '-',
   chatWebUrl: 'https://chat.clinic.local',
   livekit: { url: 'ws://lk', apiKey: 'devkey', apiSecret: 'secret-secret-secret-secret-1234' },
+  criticalTickMs: 0,
   ai: { profile: 'off', secretaryUrl: null, secretaryToken: '', callbackUrl: 'http://ccs.test', asrUrl: null, llm: null },
 };
 
@@ -51,7 +52,9 @@ export interface Harness {
  * Стенд: поддельный Synapse в памяти, сервис контекста и песочница РИС/ЛИС на случайном порту.
  * ЛИС — подключение уровня 2 (с обратными вызовами), РИС — уровня 1 (только события).
  */
-export async function setup(opts: { stepMs?: number; pushCases?: boolean; ai?: Partial<Config['ai']>; llm?: LlmClient | null } = {}): Promise<Harness> {
+export async function setup(
+  opts: { stepMs?: number; pushCases?: boolean; ai?: Partial<Config['ai']>; llm?: LlmClient | null; now?: () => number } = {},
+): Promise<Harness> {
   const matrix = new FakeMatrix(mx('ccs'), SERVER);
   for (const u of ['smirnova', 'ershova', 'kolesnikov', 'gusev', 'outsider', 'orlov', 'belova', 'petrov']) matrix.tokens.set(`tok-${u}`, mx(u));
 
@@ -84,12 +87,20 @@ export async function setup(opts: { stepMs?: number; pushCases?: boolean; ai?: P
         title: 'ЛИС патоморфологии',
         token_sha256: sha256(TOKENS.lis),
         callbacks: { url: `http://127.0.0.1:${port}/lis`, token: TOKENS.lisCallback, timeout_ms: 2000 },
+        // План эскалации критических находок: звонок на пост, затем заведующий.
+        critical: {
+          ack_deadline: 'PT10M',
+          escalation: [
+            { after: 'PT10M', action: 'call', target: 'Пост 3 онкологии' },
+            { after: 'PT15M', action: 'notify', target: 'head', users: ['gusev'] },
+          ],
+        },
       },
       { id: 'ris', kind: 'RIS', org: 'clinic', title: 'РИС', token_sha256: sha256(TOKENS.ris) },
     ],
   });
   const config: Config = { ...testConfig, ai: { ...testConfig.ai, ...opts.ai } };
-  const service = createService(config, { matrix, connectors, logger: false, log: silent, llm: opts.llm ?? null });
+  const service = createService(config, { matrix, connectors, logger: false, log: silent, llm: opts.llm ?? null, ...(opts.now ? { now: opts.now } : {}) });
   app = service.app;
   if (opts.pushCases ?? true) await mock.pushCases();
 

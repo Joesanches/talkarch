@@ -8,6 +8,7 @@ import {
   CaseLinks,
   CaseRole,
   CaseStatus,
+  IsoDuration,
   NS,
   NotificationCategory,
   NotificationLink,
@@ -22,6 +23,7 @@ export const IntegrationEventType = {
   CaseUpserted: `${NS}.case.upserted`,
   RequestStatusChanged: `${NS}.request.status.changed`,
   NotificationPosted: `${NS}.notification.posted`,
+  CriticalRaised: `${NS}.critical.raised`,
 } as const;
 export type IntegrationEventType = (typeof IntegrationEventType)[keyof typeof IntegrationEventType];
 
@@ -103,10 +105,40 @@ export const NotificationPosted = z.object({
 });
 export type NotificationPosted = z.infer<typeof NotificationPosted>;
 
+/**
+ * Данные `critical.raised`: критическая находка из РИС/ЛИС. Чат случая создаётся, если его ещё нет.
+ * Сервис ведёт срок подтверждения и эскалацию; итог возвращает обратным вызовом `POST /critical-findings/events`.
+ */
+export const CriticalRaised = z.object({
+  case_id: CaseId,
+  /** Номер находки в системе-источнике: по нему она узнаёт подтверждение. Уникален в пределах подключения. */
+  finding_id: z.string().min(1).max(128),
+  finding: z.string().trim().min(1).max(1000),
+  reported_by: UserRef,
+  recipient: z
+    .object({ role: CaseRole.optional(), users: z.array(UserRef).max(10).default([]) })
+    .refine((r) => r.role || r.users.length, 'Нужна роль адресата или пользователи'),
+  ack_deadline: IsoDuration.default('PT10M'),
+  /** Не задано — план эскалации подключения по умолчанию. */
+  escalation: z
+    .array(
+      z.object({
+        after: IsoDuration,
+        action: z.enum(['notify', 'call']),
+        target: z.string().trim().min(1).max(200),
+        users: z.array(UserRef).max(20).default([]),
+      }),
+    )
+    .max(5)
+    .optional(),
+});
+export type CriticalRaised = z.infer<typeof CriticalRaised>;
+
 export const eventDataSchemas = {
   [IntegrationEventType.CaseUpserted]: CaseSnapshot,
   [IntegrationEventType.RequestStatusChanged]: RequestStatusChanged,
   [IntegrationEventType.NotificationPosted]: NotificationPosted,
+  [IntegrationEventType.CriticalRaised]: CriticalRaised,
 } as const;
 
 /**
@@ -209,6 +241,53 @@ export const PatientRevealResponse = z.object({
   mrn: z.string().max(64).optional(),
 });
 export type PatientRevealResponse = z.infer<typeof PatientRevealResponse>;
+
+/**
+ * `POST {callbacks}/critical-findings/events` — жизненный цикл критической находки для журнала системы-источника:
+ * `raised` (отправлена в чате), `escalated` (нет подтверждения — шаг эскалации; `call` — позвонить на пост),
+ * `acknowledged` (адресат подтвердил получение). Заголовок `Idempotency-Key` — ключ события.
+ */
+export const CriticalFindingEvent = z.object({
+  type: z.enum(['raised', 'escalated', 'acknowledged']),
+  /** ID находки в «Консилиуме» (ID сообщения Matrix). */
+  finding_id: z.string().min(1),
+  /** Номер находки в системе-источнике, если она пришла оттуда. */
+  host_finding_id: z.string().max(128).optional(),
+  case_id: CaseId,
+  at: Timestamp,
+  /** `raised` — текст находки, кто сообщил, адресаты и срок. */
+  finding: z.string().max(1000).optional(),
+  reported_by: UserRef.optional(),
+  recipients: z.array(UserRef).optional(),
+  deadline_at: Timestamp.optional(),
+  /** `escalated` — шаг плана. */
+  escalation: z.object({ step: z.number().int().positive(), action: z.enum(['notify', 'call']), target: z.string(), users: z.array(UserRef).default([]) }).optional(),
+  /** `acknowledged` — кто и через сколько секунд после отправки. */
+  acknowledged_by: UserRef.optional(),
+  seconds_to_ack: z.number().int().nonnegative().optional(),
+});
+export type CriticalFindingEvent = z.infer<typeof CriticalFindingEvent>;
+
+/** `GET /integration/v1/critical-findings` — находки подключения: время подтверждения и эскалации (отчёт). */
+export const CriticalFindingSummary = z.object({
+  finding_id: z.string(),
+  host_finding_id: z.string().optional(),
+  case_id: z.string(),
+  status: z.enum(['pending', 'acknowledged']),
+  raised_at: Timestamp,
+  deadline_at: Timestamp,
+  reported_by: UserRef,
+  acknowledged_by: UserRef.optional(),
+  acknowledged_at: Timestamp.optional(),
+  seconds_to_ack: z.number().int().nonnegative().optional(),
+  /** Подтверждена позже срока. */
+  overdue: z.boolean(),
+  escalations: z.array(z.object({ step: z.number().int().positive(), at: Timestamp, action: z.enum(['notify', 'call']), target: z.string() })),
+});
+export type CriticalFindingSummary = z.infer<typeof CriticalFindingSummary>;
+
+export const CriticalFindingsResponse = z.object({ findings: z.array(CriticalFindingSummary) });
+export type CriticalFindingsResponse = z.infer<typeof CriticalFindingsResponse>;
 
 /** Ошибка в формате RFC 9457 (Problem Details). */
 export const Problem = z.object({

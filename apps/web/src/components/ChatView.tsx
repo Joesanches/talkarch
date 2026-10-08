@@ -11,6 +11,8 @@ import {
   reactionSummaries,
   reportDecisions,
   REACTIONS,
+  CRITICAL_REPORTER_ROLES,
+  criticalWaitingFor,
   membershipText,
   type MembershipKind,
   parseCaseContext,
@@ -26,9 +28,10 @@ import {
 } from '../model.ts';
 import { activeCall, formatDuration } from '../call.ts';
 import { config } from '../config.ts';
-import { toItem } from '../matrix.ts';
+import { roomCriticals, toItem } from '../matrix.ts';
 import { useAuthedMedia } from '../media.ts';
 import { ProtocolDraftCard, TranscriptCard } from './AiCards.tsx';
+import { CriticalBar, CriticalCard, CriticalForm } from './Critical.tsx';
 import { RoomAvatar } from './ChatList.tsx';
 import { RequestForm } from './RequestForm.tsx';
 import { Icon } from './Icon.tsx';
@@ -262,9 +265,9 @@ function Notice({ item }: { item: TimelineItem }) {
   );
 }
 
-function Composer({ client, room, requests }: { client: MatrixClient; room: Room; requests: boolean }) {
+function Composer({ client, room, requests, criticalRoles }: { client: MatrixClient; room: Room; requests: boolean; criticalRoles: Map<string, string[]> | null }) {
   const [text, setText] = useState('');
-  const [form, setForm] = useState(false);
+  const [form, setForm] = useState<'request' | 'critical' | null>(null);
   const invited = room.getMyMembership() === 'invite';
 
   async function send() {
@@ -292,12 +295,20 @@ function Composer({ client, room, requests }: { client: MatrixClient; room: Room
   }
   return (
     <div className="composer-wrap">
-      {requests && form && <RequestForm client={client} roomId={room.roomId} onDone={() => setForm(false)} />}
-      {requests && !form && (
+      {form === 'request' && <RequestForm client={client} roomId={room.roomId} onDone={() => setForm(null)} />}
+      {form === 'critical' && criticalRoles && <CriticalForm client={client} roomId={room.roomId} roles={criticalRoles} onDone={() => setForm(null)} />}
+      {!form && (requests || criticalRoles) && (
         <div className="quick-actions">
-          <button className="ghost" onClick={() => setForm(true)}>
-            + Заявка в ЛИС
-          </button>
+          {requests && (
+            <button className="ghost" onClick={() => setForm('request')}>
+              + Заявка в ЛИС
+            </button>
+          )}
+          {criticalRoles && (
+            <button className="ghost danger" onClick={() => setForm('critical')}>
+              ! Критическая находка
+            </button>
+          )}
         </div>
       )}
     <div className="composer">
@@ -351,6 +362,19 @@ export function ChatView({
   };
   const ctx = room.getType() === RoomType.Case ? parseCaseContext(room.currentState.getStateEvents(EventType.CaseContext, '')?.getContent()) : null;
   const roles = (room.currentState.getStateEvents(EventType.CaseRoles, '')?.getContent() as CaseRolesContent | undefined)?.members ?? {};
+  const criticals = ctx ? roomCriticals(room) : new Map();
+  const waiting = criticalWaitingFor(criticals, me).map((id) => {
+    const content = room.findEventById(id)?.getContent();
+    const parsed = content ? parseStructured(content) : null;
+    return { eventId: id, finding: parsed?.msgtype === MsgType.Critical ? parsed[MsgType.Critical].finding : 'Откройте карточку в ленте', status: criticals.get(id)! };
+  });
+  // Кнопка «Критическая находка» — врачам-диагностам; адресаты — роли случая, кроме своей.
+  const criticalRoles = (() => {
+    if (!ctx || !CRITICAL_REPORTER_ROLES.has(roles[me]?.role ?? '')) return null;
+    const byRole = new Map<string, string[]>();
+    for (const [userId, a] of Object.entries(roles)) if (userId !== me) byRole.set(a.role, [...(byRole.get(a.role) ?? []), userId]);
+    return byRole.size ? byRole : null;
+  })();
   const name = (userId: string) => room.getMember(userId)?.name ?? userId;
   const members = room.getJoinedMemberCount() + room.getInvitedMemberCount();
   const joined = room.getMyMembership() === 'join';
@@ -440,15 +464,18 @@ export function ChatView({
     const pending = events[i]?.status === EventStatus.SENDING || events[i]?.status === EventStatus.QUEUED;
     const request = e.content.msgtype === MsgType.Request ? requests.get(e.eventId) : undefined;
     const structured =
-      e.content.msgtype === MsgType.KeyImage || ((e.content.msgtype === MsgType.Transcript || e.content.msgtype === MsgType.Report) && fromService(e))
+      e.content.msgtype === MsgType.KeyImage ||
+      e.content.msgtype === MsgType.Critical ||
+      ((e.content.msgtype === MsgType.Transcript || e.content.msgtype === MsgType.Report) && fromService(e))
         ? parseStructured(e.content)
         : null;
+    const criticalMsg = structured?.msgtype === MsgType.Critical ? structured : null;
     const keyImage = structured?.msgtype === MsgType.KeyImage ? structured : null;
     const transcript = structured?.msgtype === MsgType.Transcript ? structured : null;
     const draft = structured?.msgtype === MsgType.Report && structured[MsgType.Report].kind === 'consilium_protocol' ? structured : null;
     rows.push(
       <div key={e.eventId} className={`msg ${mine ? 'out' : 'in'}${first ? ' first' : ''}`}>
-        <div className={`bubble${transcript || draft ? ' wide' : ''}`}>
+        <div className={`bubble${transcript || draft || criticalMsg ? ' wide' : ''}`}>
           {!mine && first && (
             <div className="sender">
               {name(e.sender)}
@@ -459,6 +486,8 @@ export function ChatView({
             <RequestCard view={request} />
           ) : keyImage ? (
             <KeyImageCard client={client} msg={keyImage} onOpenLink={onOpenLink} />
+          ) : criticalMsg ? (
+            <CriticalCard client={client} roomId={room.roomId} eventId={e.eventId} msg={criticalMsg} sender={e.sender} status={criticals.get(e.eventId)} me={me} name={name} />
           ) : transcript ? (
             <TranscriptCard msg={transcript} />
           ) : draft ? (
@@ -520,6 +549,7 @@ export function ChatView({
         )}
       </header>
       {ctx && <CaseBar ctx={ctx} onOpenLink={onOpenLink} client={client} roomId={room.roomId} />}
+      {joined && <CriticalBar client={client} roomId={room.roomId} waiting={waiting} />}
       {call && !inCall && joined && (
         <div className="call-banner" role="status">
           <span className="callbar-dot" />
@@ -547,7 +577,7 @@ export function ChatView({
         )}
         {rows}
       </div>
-      <Composer client={client} room={room} requests={ctx?.source === 'LIS'} />
+      <Composer client={client} room={room} requests={ctx?.source === 'LIS'} criticalRoles={criticalRoles} />
     </>
   );
 }

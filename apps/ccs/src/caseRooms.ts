@@ -244,6 +244,7 @@ export class CaseRoomService {
           [EventType.CaseContext]: 100,
           [EventType.CaseRoles]: 100,
           [EventType.RequestStatus]: 100,
+          [EventType.CriticalStatus]: 100,
           [EventType.Call]: 0,
           'm.room.name': 100,
           'm.room.power_levels': 100,

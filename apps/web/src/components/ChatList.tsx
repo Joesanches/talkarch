@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { NotificationCountType, type MatrixClient, type Room } from 'matrix-js-sdk';
 import { EventType, RoomType } from '@konsilium/protocol';
-import { avatarColor, caseCode, formatListTime, initials, parseCaseContext, preview, priorityLabel } from '../model.ts';
-import { toItem } from '../matrix.ts';
+import { avatarColor, caseCode, criticalWaitingFor, formatListTime, initials, parseCaseContext, preview, priorityLabel } from '../model.ts';
+import { roomCriticals, toItem } from '../matrix.ts';
 import { Icon } from './Icon.tsx';
 
 const kindColor: Record<string, string> = { LIS: 'var(--color-kind-pathology)', RIS: 'var(--color-kind-radiology)', TMK: 'var(--color-kind-consilium)' };
@@ -66,12 +66,13 @@ export function ChatList(props: {
           const invite = room.getMyMembership() === 'invite';
           const unread = room.getUnreadNotificationCount(NotificationCountType.Total);
           const prio = ctx?.priority ? priorityLabel[ctx.priority] : '';
+          const critical = ctx && me ? criticalWaitingFor(roomCriticals(room), me).length : 0;
           return (
             <li
               key={room.roomId}
               role="option"
               aria-selected={props.selected === room.roomId}
-              className={`room${props.selected === room.roomId ? ' selected' : ''}`}
+              className={`room${props.selected === room.roomId ? ' selected' : ''}${critical ? ' has-critical' : ''}`}
               onClick={() => props.onSelect(room)}
             >
               <RoomAvatar room={room} />
@@ -82,6 +83,11 @@ export function ChatList(props: {
                 </div>
                 <div className="room-bottom">
                   <span className="room-preview">{invite ? 'Приглашение в чат случая' : preview(item, senderName, item?.sender === me)}</span>
+                  {critical > 0 && (
+                    <b className="badge badge-critical" title="Критическая находка ждёт вашего подтверждения">
+                      !
+                    </b>
+                  )}
                   {prio && <span className={`chip ${ctx?.priority}`}>{prio}</span>}
                   {(unread > 0 || invite) && <b className="badge">{invite ? 'новый' : unread}</b>}
                 </div>

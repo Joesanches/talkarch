@@ -5,7 +5,8 @@ import { CaseDirectory, InMemoryCaseRegistry } from './cases.ts';
 import { CaseRoomService, InMemoryCaseRoomStore } from './caseRooms.ts';
 import { loadConfig, type Config } from './config.ts';
 import { ConnectorRegistry, UserResolver, type Connector } from './connectors.ts';
-import { createPool, ensureDatabase, migrate, PgCaseRegistry, PgCaseRoomStore, PgProcessedEvents, PgRequestStore } from './db.ts';
+import { CriticalService, InMemoryCriticalStore } from './critical.ts';
+import { createPool, ensureDatabase, migrate, PgCaseRegistry, PgCaseRoomStore, PgCriticalStore, PgProcessedEvents, PgRequestStore } from './db.ts';
 import { EventProcessor, type Logger } from './events.ts';
 import { HttpHostCallbacks, type HostCallbacks } from './host.ts';
 import { InMemoryProcessedEvents, IntegrationService } from './integration.ts';
@@ -22,6 +23,8 @@ export interface ServiceOptions {
   matrix?: MatrixApi;
   /** Подменить LLM (тесты); null — без LLM. */
   llm?: LlmClient | null;
+  /** Часы для сроков критических находок (тесты). */
+  now?: () => number;
 }
 
 /** Собрать сервис из конфигурации (используется в main, модульных и интеграционных тестах). */
@@ -36,6 +39,7 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
   const requests = pool ? new PgRequestStore(pool) : new InMemoryRequestStore();
   const roomStore = pool ? new PgCaseRoomStore(pool) : new InMemoryCaseRoomStore();
   const processed = pool ? new PgProcessedEvents(pool) : new InMemoryProcessedEvents();
+  const criticalStore = pool ? new PgCriticalStore(pool) : new InMemoryCriticalStore();
   const callbacks = new Map<string, HostCallbacks>();
   const callbacksFor = (c: Connector) => {
     if (!c.callbacks) return null;
@@ -44,6 +48,7 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
   };
   const directory = new CaseDirectory({ registry, connectors, users, callbacksFor });
   const caseRooms = new CaseRoomService(matrix, roomStore, { aliasSecret: config.aliasSecret, serverName: config.serverName });
+  const critical = new CriticalService({ matrix, store: criticalStore, directory, caseRooms, connectors, users, log, ...(opts.now ? { now: opts.now } : {}) });
   const calls = new CallTokenService(matrix, { ...config.livekit, roomSecret: config.aliasSecret });
   const secretary = new SecretaryService({
     matrix,
@@ -66,9 +71,10 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
     registry,
     caseRooms,
     calls,
-    events: new EventProcessor({ matrix, directory, requests, users, log }),
-    integration: new IntegrationService({ matrix, directory, registry, caseRooms, requests, processed, log }),
+    events: new EventProcessor({ matrix, directory, requests, users, critical, log }),
+    integration: new IntegrationService({ matrix, directory, registry, caseRooms, requests, processed, critical, log }),
     secretary,
+    critical,
     logger: opts.logger ?? true,
   });
   if (pool && config.databaseUrl) {
@@ -89,6 +95,11 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
       await pool.end();
     });
   }
+  // Сроки критических находок: проверка по таймеру (0 — не запускать; тесты вызывают tick сами).
+  if (config.criticalTickMs > 0) {
+    app.addHook('onReady', async () => critical.start(config.criticalTickMs));
+    app.addHook('onClose', async () => critical.stop());
+  }
   // Имя сервиса в лентах чатов вместо технического «ccs». Ошибка не мешает запуску.
   if (matrix instanceof HttpMatrixApi) {
     app.addHook('onReady', async () => {
@@ -102,7 +113,7 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
         .catch((err) => app.log.warn({ err }, 'Ping Application Service не прошёл'));
     });
   }
-  return { app, matrix, connectors, registry, caseRooms, calls, directory, secretary };
+  return { app, matrix, connectors, registry, caseRooms, calls, directory, secretary, critical };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

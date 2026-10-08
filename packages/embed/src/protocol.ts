@@ -39,6 +39,8 @@ export interface UnreadItem {
   unread: number;
   /** Новое приглашение в чат случая, ещё не открытый. */
   invited: boolean;
+  /** Критические находки, которые ждут подтверждения этого пользователя: хост показывает их отдельным, красным бейджем. */
+  critical: number;
 }
 
 export type LinkOpen =
