@@ -1,10 +1,26 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react';
 import { Direction, EventStatus, type MatrixClient, type MatrixEvent, type Room } from 'matrix-js-sdk';
-import { EventType, MsgType, RoomType, parseStructured, type CaseContext, type CaseRolesContent, type KeyImage, type SlideRoi, type TranscriptSegment } from '@konsilium/protocol';
+import {
+  EventType,
+  MsgType,
+  RoomType,
+  parseStructured,
+  type CaseContext,
+  type CaseRolesContent,
+  type KeyImage,
+  type SlideRoi,
+  type TranscriptMessage,
+  type TranscriptSegment,
+} from '@konsilium/protocol';
 import type { LinkOpen } from '@konsilium/embed/protocol';
 import {
   firstUnreadIndex,
   typingText,
+  isConsiliumLead,
+  parseConsilium,
+  parseConsiliumCurrent,
+  plural,
+  reportDeliveries,
   attachmentProblem,
   formatSize,
   quoteText,
@@ -38,6 +54,7 @@ import { config } from '../config.ts';
 import { closeArchived, roomArchived, roomCriticals, toItem, unreadCount } from '../matrix.ts';
 import { downloadMedia, maxUploadBytes, sendAttachment, useAuthedMedia } from '../media.ts';
 import { ProtocolDraftCard, TranscriptCard } from './AiCards.tsx';
+import { ConsiliumBar, ConsiliumReview, type ConsiliumDraftView } from './Consilium.tsx';
 import { CriticalBar, CriticalCard, CriticalForm } from './Critical.tsx';
 import { RoomAvatar } from './ChatList.tsx';
 import { RequestForm } from './RequestForm.tsx';
@@ -642,11 +659,29 @@ export function ChatView({
   const service = room.getCreator();
   const fromService = (e: { sender: string }) => !!service && e.sender === service;
   const transcripts = new Map<string, Map<number, TranscriptSegment>>();
+  const transcriptMsgs = new Map<string, TranscriptMessage>();
   for (const e of items) {
     if (e.type !== 'm.room.message' || e.content.msgtype !== MsgType.Transcript || !fromService(e)) continue;
     const t = parseStructured(e.content);
-    if (t?.msgtype === MsgType.Transcript) transcripts.set(e.eventId, new Map(t[MsgType.Transcript].segments.map((s) => [s.i, s])));
+    if (t?.msgtype !== MsgType.Transcript) continue;
+    transcripts.set(e.eventId, new Map(t[MsgType.Transcript].segments.map((s) => [s.i, s])));
+    transcriptMsgs.set(e.eventId, t);
   }
+  // Консилиум: повестка, текущий случай, ведущие; черновики по случаям и их передача в МИС (пишет только сервис).
+  const consilium = room.getType() === RoomType.Consilium ? parseConsilium(room.currentState.getStateEvents(EventType.Consilium, '')?.getContent()) : null;
+  const currentCase = consilium ? parseConsiliumCurrent(room.currentState.getStateEvents(EventType.ConsiliumCurrent, '')?.getContent(), consilium.agenda.length) : 0;
+  const lead = isConsiliumLead(consilium, me);
+  const deliveries = reportDeliveries(items.filter(fromService));
+  const consiliumDrafts: ConsiliumDraftView[] = [];
+  if (consilium) {
+    for (const e of items) {
+      if (e.type !== 'm.room.message' || e.content.msgtype !== MsgType.Report || !fromService(e)) continue;
+      const p = parseStructured(e.content);
+      if (p?.msgtype === MsgType.Report && p[MsgType.Report].agenda && p[MsgType.Report].status === 'draft') consiliumDrafts.push({ eventId: e.eventId, msg: p });
+    }
+  }
+  const [review, setReview] = useState<string | null>(null);
+  const reviewed = review ? consiliumDrafts.find((d) => d.eventId === review) : undefined;
   const react = (eventId: string, key: string) => {
     const mine = reactions.get(eventId)?.find((r) => r.key === key)?.mine;
     if (mine) void client.redactEvent(room.roomId, mine).catch(() => undefined);
@@ -896,6 +931,7 @@ export function ChatView({
               decision={decisions.get(e.eventId)}
               canDecide={writable}
               name={name}
+              {...(consilium ? { onReview: () => setReview(e.eventId), delivery: deliveries.get(e.eventId), lead } : {})}
             />
           ) : media && e.content.msgtype === 'm.image' ? (
             <ImageAttachment client={client} content={media} />
@@ -950,7 +986,8 @@ export function ChatView({
           <div className="chat-subtitle">
             {ctx && compact ? <span className="mono">{ctx.case_id}</span> : null}
             {ctx ? (compact ? ' · ' : `Чат случая · ${systemLabel[ctx.source] ?? ctx.source} · `) : ''}
-            {members} {members % 10 === 1 && members % 100 !== 11 ? 'участник' : members % 10 >= 2 && members % 10 <= 4 && (members % 100 < 12 || members % 100 > 14) ? 'участника' : 'участников'}
+            {consilium ? `Консилиум · ${plural(consilium.agenda.length, ['случай', 'случая', 'случаев'])} · ` : ''}
+            {plural(members, ['участник', 'участника', 'участников'])}
           </div>
         </div>
         {(writable || onMinimize || fullUrl) && (
@@ -979,6 +1016,15 @@ export function ChatView({
         )}
       </header>
       {ctx && !compact && <CaseBar ctx={ctx} onOpenLink={onOpenLink} client={client} roomId={room.roomId} archived={archived} />}
+      {consilium && !compact && (
+        <ConsiliumBar
+          consilium={consilium}
+          current={currentCase}
+          lead={lead && writable}
+          name={name}
+          onSelect={(index) => void client.sendStateEvent(room.roomId, EventType.ConsiliumCurrent as never, { index } as never, '').catch(() => undefined)}
+        />
+      )}
       {writable && <CriticalBar client={client} roomId={room.roomId} waiting={waiting} />}
       {call && !inCall && writable && (
         <div className="call-banner" role="status">
@@ -1035,6 +1081,22 @@ export function ChatView({
           onFiles={(files) => void attach(files)}
           uploads={uploads}
           onDismissUpload={(id) => setUploads((u) => u.filter((x) => x.id !== id))}
+        />
+      )}
+      {consilium && reviewed && (
+        <ConsiliumReview
+          client={client}
+          roomId={room.roomId}
+          consilium={consilium}
+          drafts={consiliumDrafts}
+          selected={reviewed.eventId}
+          onSelect={setReview}
+          transcript={transcriptMsgs.get(reviewed.msg[MsgType.Report].transcript_event_id ?? '') ?? null}
+          decisions={decisions}
+          deliveries={deliveries}
+          lead={lead && writable}
+          name={name}
+          onClose={() => setReview(null)}
         />
       )}
     </>

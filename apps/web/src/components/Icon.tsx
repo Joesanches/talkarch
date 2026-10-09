@@ -24,6 +24,8 @@ const paths: Record<string, string> = {
   attach: 'M20 11.5l-8.3 8.3a5 5 0 0 1-7-7l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8',
   file: 'M6 3h8l5 5v13H6zM14 3v5h5',
   close: 'M6 6l12 12M18 6L6 18',
+  users: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21c0-4 3-6 7-6s7 2 7 6M16 3.5a4 4 0 0 1 0 7M18 15c2.5.6 4 2.6 4 6',
+  next: 'M5 5l7 7-7 7M13 5l7 7-7 7',
 };
 
 export function Icon({ name, size = 22 }: { name: keyof typeof paths | string; size?: number }) {

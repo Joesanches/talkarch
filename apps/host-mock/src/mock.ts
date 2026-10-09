@@ -84,6 +84,8 @@ export interface HostMockOptions {
   chatUrl?: string;
   /** Имя сервера Matrix — для Matrix ID говорящих в демо-агенте «Секретаря». */
   serverName?: string;
+  /** Токен, с которым сервис контекста вызывает агента «Секретаря» (SECRETARY_TOKEN). Не задан — демо-агент выключен. */
+  secretaryToken?: string;
   logger?: boolean;
 }
 
@@ -128,6 +130,7 @@ export function createHostMock(opts: HostMockOptions) {
   /** Сессии демо-агента «Секретаря» и сценарий для ближайшей остановленной сессии. */
   const agentSessions = new Map<string, { callbackUrl: string; callbackToken: string; startedAt: number }>();
   let nextScript: ScriptLine[] | null = null;
+  const startedAt = Date.now().toString(36);
   /** Журнал критических находок «системы-источника»: что пришло обратными вызовами (ключ идемпотентности → событие). */
   const criticalEvents = new Map<string, CriticalFindingEvent & { connector: string }>();
   const timers = new Set<NodeJS.Timeout>();
@@ -214,7 +217,9 @@ export function createHostMock(opts: HostMockOptions) {
     const out: Record<string, { status: number; body: EventsResponse }> = {};
     for (const c of opts.connectors) {
       const list = (consilia.get(c.id) ?? []).map((x) => consiliumData(x));
-      if (list.length) out[c.id] = await push(c.id, list.map((x) => event(c.id, IntegrationEventType.ConsiliumUpserted, `${c.id}:consilium:${x.consilium_id}:v${x.version}`, x)));
+      // В ID события — метка запуска песочницы: сервис контекста помнит обработанные события 7 дней, а комнату консилиума
+      // создаёт по событию. Перезапуск песочницы досылает консилиум (та же версия — без изменений, новый сервис — новая комната).
+      if (list.length) out[c.id] = await push(c.id, list.map((x) => event(c.id, IntegrationEventType.ConsiliumUpserted, `${c.id}:consilium:${x.consilium_id}:v${x.version}:${startedAt}`, x)));
     }
     return out;
   }
@@ -389,7 +394,15 @@ export function createHostMock(opts: HostMockOptions) {
   // ── Демо-агент ИИ-«Секретаря» ────────────────────────────────────────────────
   // Тот же API, что у apps/secretary, но без LiveKit и распознавания: по остановке отдаёт сценарий реплик.
 
+  /** Демо-агента вызывает только сервис контекста — с тем же токеном, что настоящего агента. */
+  function agentAuthorized(req: FastifyRequest, reply: FastifyReply): boolean {
+    if (opts.secretaryToken && req.headers.authorization === `Bearer ${opts.secretaryToken}`) return true;
+    reply.code(opts.secretaryToken ? 401 : 404).send({ error: opts.secretaryToken ? 'Неверный токен агента' : 'Демо-агент выключен' });
+    return false;
+  }
+
   app.post('/demo/secretary/sessions', async (req, reply) => {
+    if (!agentAuthorized(req, reply)) return reply;
     const body = z.object({ session_id: z.string(), callback_url: z.string().url(), callback_token: z.string() }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'Нет session_id или callback_url' });
     agentSessions.set(body.data.session_id, { callbackUrl: body.data.callback_url, callbackToken: body.data.callback_token, startedAt: Date.now() });
@@ -397,6 +410,7 @@ export function createHostMock(opts: HostMockOptions) {
   });
 
   app.delete('/demo/secretary/sessions/:id', async (req, reply) => {
+    if (!agentAuthorized(req, reply)) return reply;
     const { id } = req.params as { id: string };
     const s = agentSessions.get(id);
     if (!s) return reply.code(404).send({ error: 'Нет сессии' });
@@ -431,8 +445,24 @@ export function createHostMock(opts: HostMockOptions) {
     return reply.code(202).send({ ok: true });
   });
 
+  /**
+   * Назначить консилиум песочницы ещё раз — с другим номером и, при желании, названием (повторный показ, сквозные тесты).
+   * Как настоящая МИС — с токеном подключения.
+   */
+  app.post('/demo/consilium', async (req, reply) => {
+    const body = z.object({ connector: z.string().default('lis'), title: z.string().trim().min(1).max(200).optional() }).safeParse(req.body ?? {});
+    const template = body.success ? consilia.get(body.data.connector)?.[0] : undefined;
+    if (!body.success || !template) return reply.code(404).send({ error: 'Нет консилиума в данных песочницы' });
+    if (req.headers.authorization !== `Bearer ${connector(body.data.connector).token}`) return reply.code(401).send({ error: 'Нужен токен подключения' });
+    const base = consiliumData(template);
+    const data = { ...base, consilium_id: `${base.consilium_id}-${Date.now().toString(36)}`, ...(body.data.title ? { title: body.data.title } : {}) };
+    const r = await push(body.data.connector, [event(body.data.connector, IntegrationEventType.ConsiliumUpserted, `${body.data.connector}:consilium:${data.consilium_id}:v1`, data)]);
+    return reply.code(r.status === 200 ? 201 : 502).send({ consilium_id: data.consilium_id, title: data.title, results: r.body?.results });
+  });
+
   /** Сценарий для ближайшей остановленной сессии (сквозные тесты задают реплики со временем). */
   app.post('/demo/secretary/script', async (req, reply) => {
+    if (!agentAuthorized(req, reply)) return reply;
     const body = z.object({ lines: z.array(ScriptLine).min(1) }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: body.error.message });
     nextScript = body.data.lines;

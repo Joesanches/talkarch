@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { EventType, MsgType, RoomType } from '@konsilium/protocol';
 import {
   FOLDERS,
+  consiliumMemberLabel,
+  deliveryText,
+  isConsiliumLead,
+  parseConsiliumCurrent,
+  plural,
+  reportDeliveries,
   firstUnreadIndex,
   typingText,
   archivedLabel,
@@ -267,5 +273,37 @@ describe('встраивание в ЛИС: «печатает…», непро�
     const slide = item('$s', 'm.room.message', { msgtype: MsgType.SlideRoi, body: 'Стекло 2, блок 1Б: H&E' });
     expect(quoteText(slide)).toBe('Препарат: Стекло 2, блок 1Б: H&E');
     expect(preview(slide, 'Смирнова А. В.', false)).toBe('Смирнова: Препарат: Стекло 2, блок 1Б: H&E');
+  });
+});
+
+describe('консилиум', () => {
+  it('подписи участников и склонение', () => {
+    expect(consiliumMemberLabel({ role: 'chair', title: 'заведующая отделением' })).toBe('председатель, заведующая отделением');
+    expect(consiliumMemberLabel({ role: 'member', title: 'онколог' }, true)).toBe('докладчик, онколог');
+    expect(consiliumMemberLabel({ role: 'member', title: 'химиотерапевт', remote: true })).toBe('химиотерапевт · дистанционно');
+    expect(consiliumMemberLabel(undefined)).toBe('участник');
+    expect([1, 3, 5, 11, 22].map((n) => plural(n, ['случай', 'случая', 'случаев']))).toEqual(['1 случай', '3 случая', '5 случаев', '11 случаев', '22 случая']);
+  });
+
+  it('ведущие, текущий случай, папка «Каналы»', () => {
+    const c = { members: { '@belova:x': { role: 'chair' }, '@kolesnikov:x': { role: 'member' } } } as never;
+    expect(isConsiliumLead(c, '@belova:x')).toBe(true);
+    expect(isConsiliumLead(c, '@kolesnikov:x')).toBe(false);
+    expect(isConsiliumLead(null, '@belova:x')).toBe(false);
+    expect(parseConsiliumCurrent({ index: 2 }, 3)).toBe(2);
+    expect(parseConsiliumCurrent({ index: 5 }, 3)).toBe(0);
+    expect(parseConsiliumCurrent(undefined, 3)).toBe(0);
+    expect(foldersOf({ roomType: RoomType.Consilium, isDirect: false })).toEqual(['all', 'channels']);
+  });
+
+  it('передача протокола в МИС и подписи в списке чатов', () => {
+    const delivery = item('$d', EventType.ReportDelivery, { 'm.relates_to': { rel_type: 'm.reference', event_id: '$draft' }, status: 'awaiting_signatures', signers: 6, system: 'МИС' });
+    const d = reportDeliveries([delivery]).get('$draft')!;
+    expect(deliveryText(d)).toBe('Отправлено в МИС как черновик протокола · ожидает подписей 6 участников');
+    expect(deliveryText({ ...d, status: 'failed', note: 'Передача в МИС не подключена' })).toBe('Передача в МИС не подключена');
+    const draft = item('$r', 'm.room.message', { msgtype: MsgType.Report, body: 'ЧЕРНОВИК ПРОТОКОЛА…', [MsgType.Report]: { status: 'draft', agenda: { index: 1, total: 3 } } });
+    expect(preview(draft, 'Консилиум · сервис', false)).toBe('Черновик протокола · случай 2 из 3');
+    const copy = item('$c', 'm.room.message', { msgtype: MsgType.Report, body: 'ПРОТОКОЛ…', [MsgType.Report]: { status: 'accepted' } });
+    expect(preview(copy, 'Консилиум · сервис', false)).toBe('Протокол консилиума принят');
   });
 });

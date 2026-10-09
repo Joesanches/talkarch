@@ -16,6 +16,13 @@ export function RoomAvatar({ room, size = 'normal' }: { room: Room; size?: 'norm
       </div>
     );
   }
+  if (room.getType() === RoomType.Consilium) {
+    return (
+      <div className={`avatar person consilium ${size}`} aria-hidden>
+        <Icon name="users" size={size === 'small' ? 18 : 22} />
+      </div>
+    );
+  }
   if (room.getType() === RoomType.Case) {
     // Приглашение: контекста случая в приглашении нет, только тип комнаты.
     return <div className={`avatar case ${size}`} style={{ background: 'var(--color-kind-saved)' }}>СЛ</div>;
@@ -99,7 +106,7 @@ export function ChatList(props: {
                   <span className="room-time">{last ? formatListTime(last.getTs()) : ''}</span>
                 </div>
                 <div className="room-bottom">
-                  <span className="room-preview">{invite ? 'Приглашение в чат случая' : preview(item, senderName, item?.sender === me)}</span>
+                  <span className="room-preview">{invite ? (room.getType() === RoomType.Consilium ? 'Приглашение на консилиум' : 'Приглашение в чат случая') : preview(item, senderName, item?.sender === me)}</span>
                   {critical > 0 && (
                     <b className="badge badge-critical" title="Критическая находка ждёт вашего подтверждения">
                       !

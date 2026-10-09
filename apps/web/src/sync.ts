@@ -28,6 +28,9 @@ export const LIST_REQUIRED_STATE: string[][] = [
   ['m.room.name', ''],
   ['m.room.avatar', ''],
   [EventType.CaseContext, ''],
+  // Консилиум: название, повестка и текущий случай — для строки списка и бейджей.
+  [EventType.Consilium, ''],
+  [EventType.ConsiliumCurrent, ''],
   // Архив: вернувшийся видит пометку в списке; из выведенных комнат клиент выходит насовсем (forget).
   [EventType.CaseArchive, ''],
   [EventType.CriticalStatus, '*'],

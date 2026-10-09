@@ -1,7 +1,18 @@
 import { useState } from 'react';
 import type { MatrixClient } from 'matrix-js-sdk';
-import { EventType, MsgType, type DraftStatement, type ProtocolDraft, type ReportStatusContent, type TranscriptMessage, type TranscriptSegment } from '@konsilium/protocol';
-import { formatTime, offsetLabel, type ReportDecision } from '../model.ts';
+import {
+  EventType,
+  MsgType,
+  type DraftStatement,
+  type ProtocolDraft,
+  type ReportDeliveryContent,
+  type ReportStatusContent,
+  type TranscriptMessage,
+  type TranscriptSegment,
+} from '@konsilium/protocol';
+import { deliveryText, formatTime, offsetLabel, type ReportDecision } from '../model.ts';
+
+const formLabel = { remote: 'дистанционно', in_person: 'очно', mixed: 'очно и дистанционно' } as const;
 
 /** Стенограмма звонка от ИИ-«Секретаря»: начало сразу, остальное — по кнопке. */
 export function TranscriptCard({ msg }: { msg: TranscriptMessage }) {
@@ -71,8 +82,48 @@ function Statement({ s, segments }: { s: DraftStatement; segments: Map<number, T
 }
 
 /**
+ * Черновик протокола консилиума по случаю повестки — в комнате консилиума: краткая карточка, проверка и принятие —
+ * на экране протокола рядом со стенограммой.
+ */
+function ConsiliumDraftCard(props: { msg: ProtocolDraft; decision: ReportDecision | undefined; delivery: ReportDeliveryContent | undefined; lead: boolean; onReview: () => void; name: (userId: string) => string }) {
+  const d = props.msg[MsgType.Report];
+  const { decision } = props;
+  return (
+    <div className="ai-card" aria-label="Черновик протокола">
+      <div className="ai-card-head">
+        <b>
+          Черновик протокола · случай {d.agenda!.index + 1} из {d.agenda!.total}
+        </b>
+        <span className="chip ai">{d.generated_by === 'llm' ? 'Черновик ИИ' : 'Черновик · шаблон'}</span>
+      </div>
+      <div className="meta">
+        {d.case && (
+          <>
+            <span className="mono">{d.case.case_id}</span> · {d.case.title} · {d.case.patient} ·{' '}
+          </>
+        )}
+        {d.meeting.start}–{d.meeting.end}
+      </div>
+      <div className="draft-actions">
+        {decision && (
+          <span className={`chip ${decision.status === 'accepted' ? 'done' : 'cito'}`} role="status">
+            {decision.status === 'accepted' ? 'Принят' : 'Отклонён'} · {props.name(decision.sender)}, {formatTime(decision.ts)}
+          </span>
+        )}
+        <button className={props.lead && !decision ? 'primary' : 'ghost'} onClick={props.onReview}>
+          {props.lead && !decision ? 'Проверить и принять' : 'Открыть протокол'}
+        </button>
+      </div>
+      {props.delivery && <div className="meta">{deliveryText(props.delivery)}</div>}
+    </div>
+  );
+}
+
+/**
  * Черновик протокола консилиума. Состав, случай и время подставлены системой, разделы — ИИ со ссылками на стенограмму.
  * Врач принимает черновик в протокол или отклоняет; решение видно всем и попадает в журнал комнаты.
+ * Черновик по случаю консилиума (`agenda`) — краткой карточкой с переходом к проверке; принятая копия в чате случая
+ * (`status: accepted`) — протоколом без кнопок.
  */
 export function ProtocolDraftCard(props: {
   client: MatrixClient;
@@ -83,9 +134,17 @@ export function ProtocolDraftCard(props: {
   decision: ReportDecision | undefined;
   canDecide: boolean;
   name: (userId: string) => string;
+  /** Консилиум: открыть экран проверки протокола. */
+  onReview?: () => void;
+  delivery?: ReportDeliveryContent;
+  lead?: boolean;
 }) {
   const { msg, decision } = props;
   const d = msg[MsgType.Report];
+  if (d.agenda && d.status === 'draft' && props.onReview) {
+    return <ConsiliumDraftCard msg={msg} decision={decision} delivery={props.delivery} lead={!!props.lead && props.canDecide} onReview={props.onReview} name={props.name} />;
+  }
+  const accepted = d.status === 'accepted' ? d.accepted : undefined;
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -101,16 +160,24 @@ export function ProtocolDraftCard(props: {
   }
 
   return (
-    <div className="ai-card" aria-label="Черновик протокола">
+    <div className="ai-card" aria-label={accepted ? 'Протокол консилиума' : 'Черновик протокола'}>
       <div className="ai-card-head">
-        <b>Черновик протокола консилиума</b>
-        <span className="chip ai">{d.generated_by === 'llm' ? 'Черновик ИИ' : 'Черновик · шаблон'}</span>
+        <b>{accepted ? 'Протокол консилиума · принят' : 'Черновик протокола консилиума'}</b>
+        <span className="chip ai">{accepted ? 'подписание — в МИС' : d.generated_by === 'llm' ? 'Черновик ИИ' : 'Черновик · шаблон'}</span>
       </div>
       <dl className="draft-meta">
         <dt>Дата</dt>
         <dd>
-          {d.meeting.date}, {d.meeting.start}–{d.meeting.end}, {d.meeting.form === 'remote' ? 'дистанционно' : 'очно'}
+          {d.meeting.date}, {d.meeting.start}–{d.meeting.end}, {formLabel[d.meeting.form]}
         </dd>
+        {d.agenda && (
+          <>
+            <dt>Консилиум</dt>
+            <dd>
+              {d.agenda.consilium}, случай {d.agenda.index + 1} из {d.agenda.total}
+            </dd>
+          </>
+        )}
         {d.case && (
           <>
             <dt>Случай</dt>
@@ -120,7 +187,7 @@ export function ProtocolDraftCard(props: {
           </>
         )}
         <dt>Состав</dt>
-        <dd>{d.participants.map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(', ') || '—'}</dd>
+        <dd>{d.participants.map((p) => `${p.name}${p.role ? ` (${p.role}${p.remote ? ', дистанционно' : ''})` : p.remote ? ' (дистанционно)' : ''}`).join(', ') || '—'}</dd>
       </dl>
       {SECTIONS.map(({ key, title, empty }) => (
         <section key={key} className="draft-section">
@@ -137,7 +204,11 @@ export function ProtocolDraftCard(props: {
         </section>
       ))}
       <div className="draft-actions">
-        {decision ? (
+        {accepted ? (
+          <span className="chip done" role="status">
+            Принят: {accepted.name}, {formatTime(Date.parse(accepted.at))} · подписание — в МИС
+          </span>
+        ) : decision ? (
           <span className={`chip ${decision.status === 'accepted' ? 'done' : 'cito'}`} role="status">
             {decision.status === 'accepted' ? 'Принят в протокол' : 'Отклонён'} · {props.name(decision.sender)}, {formatTime(decision.ts)}
           </span>
@@ -157,7 +228,7 @@ export function ProtocolDraftCard(props: {
           {copied ? 'Скопировано' : 'Копировать текст'}
         </button>
       </div>
-      {d.generated_by === 'llm' && <div className="meta">Сформировано ИИ{d.model ? ` (${d.model})` : ''}. Проверьте каждое утверждение по стенограмме.</div>}
+      {d.generated_by === 'llm' && !accepted && <div className="meta">Сформировано ИИ{d.model ? ` (${d.model})` : ''}. Проверьте каждое утверждение по стенограмме.</div>}
     </div>
   );
 }

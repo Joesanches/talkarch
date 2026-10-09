@@ -27,6 +27,8 @@ pnpm dev:web
 
 Откройте чат случая так же, как его откроет кнопка в ЛИС: <http://localhost:5173/c/lis/Г26-04512>. Встраивание в РИС — демо-страница песочницы <http://localhost:8090/demo/ris> (вход во фрейме как `orlov`), в ЛИС — <http://localhost:8090/demo/lis> (плавающий чат, вход как `smirnova`). Вход — `smirnova`, пароль `dev-only-password-1`. Цвет бренда можно примерить параметром `?accent=0E7C6B`.
 
+**Консилиум.** Песочница при старте назначает «Онкоконсилиум» на сегодня из трёх случаев ЛИС и РИС: войдите как `belova` (председатель) или `petrov` (секретарь), он — в папке «Каналы». Стенограмма без профиля `ai` — демо-агент песочницы (сценарий реплик вместо распознавания): в `apps/ccs/.env` задайте `SECRETARY_URL=http://localhost:8090/demo/secretary`, `SECRETARY_TOKEN=dev-only-secretary-token-0123456789`, `AI_PROFILE=external`. Сквозной тест `pnpm e2e consilium` включает его сам.
+
 Проверка:
 - `curl http://localhost:8008/_matrix/client/versions` — Synapse;
 - `curl http://localhost:8080/healthz` — сервис контекста;

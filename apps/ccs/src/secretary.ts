@@ -342,10 +342,17 @@ export class SecretaryService {
     return { sessionId };
   }
 
-  async stop(userToken: string, roomId: string): Promise<void> {
-    await this.ensureMember(userToken, roomId);
+  async stop(userToken: string, roomId: string, callId = 'main'): Promise<void> {
+    const userId = await this.ensureMember(userToken, roomId);
     const sessionId = this.sessionFor(roomId);
-    if (!sessionId) throw new SecretaryError(409, 'Стенограмма не ведётся');
+    if (!sessionId) {
+      // Индикатор есть, а сессии нет — сервис перезапускался посреди стенограммы: снимаем индикатор и говорим, что записи нет.
+      const call = CallState.safeParse(await this.deps.matrix.getState(roomId, EventType.Call, callId).catch(() => null));
+      if (!call.success || !call.data.transcription) throw new SecretaryError(409, 'Стенограмма не ведётся');
+      await this.setTranscription(roomId, callId, undefined, userId);
+      await this.deps.matrix.sendEvent(roomId, 'm.room.message', { msgtype: 'm.notice', body: 'Стенограмма прервана: сервис перезапускался, запись не сохранена.' });
+      return;
+    }
     // Агент завершит распознавание и пришлёт результат.
     const res = await fetch(`${this.deps.secretaryUrl}/sessions/${sessionId}`, {
       method: 'DELETE',

@@ -1,10 +1,10 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { ConnectionState, Room, RoomEvent, Track, type Participant, type Track as LkTrack } from 'livekit-client';
 import type { MatrixClient, Room as MatrixRoom } from 'matrix-js-sdk';
-import { RoomType } from '@konsilium/protocol';
+import { EventType, RoomType } from '@konsilium/protocol';
 import { activeCall, formatDuration, isHuman, markCallEnded, markCallStarted, requestCallToken, setSecretary } from '../call.ts';
 import type { Session } from '../matrix.ts';
-import { avatarColor, initials } from '../model.ts';
+import { avatarColor, initials, isConsiliumLead, parseConsilium, parseConsiliumCurrent } from '../model.ts';
 import { Icon } from './Icon.tsx';
 
 function Media({ track, kind, mirrored }: { track: LkTrack; kind: 'video' | 'audio'; mirrored?: boolean }) {
@@ -62,6 +62,9 @@ export function CallPanel(props: {
   const [now, setNow] = useState(Date.now());
   const [secretary, setSecretaryAvail] = useState<{ eta_minutes: number } | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
+  // Стенограмму можно включить, только когда звонок уже отмечен в комнате: иначе отметка начала звонка (без признака
+  // стенограммы) могла лечь поверх состояния, которое записал сервис, и индикатор пропадал при идущей записи.
+  const [callMarked, setCallMarked] = useState(false);
   const [aiNote, setAiNote] = useState<string | null>(null);
   // После «Остановить» агент дочитывает звук и отдаёт итоги — до снятия индикатора кнопка неактивна.
   const [aiStopping, setAiStopping] = useState(false);
@@ -92,12 +95,16 @@ export function CallPanel(props: {
       try {
         const t = await requestCallToken(session, room.roomId);
         if (!alive) return;
-        setSecretaryAvail(room.getType() === RoomType.Case ? (t.secretary ?? null) : null);
+        // Стенограмма — в чатах случаев и на консилиумах: итоги публикует сервис, он в этих комнатах есть.
+        const clinical = room.getType() === RoomType.Case || room.getType() === RoomType.Consilium;
+        setSecretaryAvail(clinical ? (t.secretary ?? null) : null);
         await lkRoom.connect(t.url, t.token);
         if (!alive) return void lkRoom.disconnect();
         setStartedAt(Date.now());
-        const kind = room.getType() === RoomType.Case ? 'consilium' : 'direct';
-        void markCallStarted(client, room, kind).catch(() => undefined);
+        const kind = clinical ? 'consilium' : 'direct';
+        void markCallStarted(client, room, kind)
+          .catch(() => undefined)
+          .finally(() => alive && setCallMarked(true));
         await lkRoom.localParticipant.setMicrophoneEnabled(true).catch(() => setError('Нет доступа к микрофону — вас не слышно'));
         if (video) await lkRoom.localParticipant.setCameraEnabled(true).catch(() => setError('Нет доступа к камере'));
       } catch (e) {
@@ -198,6 +205,13 @@ export function CallPanel(props: {
     );
   }
 
+  // Консилиум: текущий случай повестки прямо в звонке — ведущие переключают его, не сворачивая видео.
+  const consilium = room.getType() === RoomType.Consilium ? parseConsilium(room.currentState.getStateEvents(EventType.Consilium, '')?.getContent()) : null;
+  const current = consilium ? parseConsiliumCurrent(room.currentState.getStateEvents(EventType.ConsiliumCurrent, '')?.getContent(), consilium.agenda.length) : 0;
+  const item = consilium?.agenda[current];
+  const lead = isConsiliumLead(consilium, client.getUserId() ?? '');
+  const memberName = (id: string) => room.getMember(id)?.name ?? id;
+
   return (
     <div className="call" role="region" aria-label="Звонок">
       <div className="call-top">
@@ -212,6 +226,27 @@ export function CallPanel(props: {
           <Icon name="minimize" />
         </button>
       </div>
+      {consilium && item && (
+        <div className="call-agenda" role="group" aria-label="Текущий случай">
+          <span className="agenda-num">
+            {current + 1}/{consilium.agenda.length}
+          </span>
+          <span className="mono">{item.case_id}</span>
+          <span>
+            {item.patient.masked}
+            {item.patient.age !== undefined ? `, ${item.patient.age}` : ''} · {item.title}
+          </span>
+          {item.presenter && <span className="muted">докл. {memberName(item.presenter)}</span>}
+          {lead && current < consilium.agenda.length - 1 && (
+            <button
+              className="ghost"
+              onClick={() => void client.sendStateEvent(room.roomId, EventType.ConsiliumCurrent as never, { index: current + 1 } as never, '').catch(() => undefined)}
+            >
+              <Icon name="next" size={16} /> Следующий случай
+            </button>
+          )}
+        </div>
+      )}
       {error && <div className="call-error" role="alert">{error}</div>}
       {aiNote && (
         <div className="call-note" role="status">
@@ -240,7 +275,7 @@ export function CallPanel(props: {
           <button
             className={`call-btn${transcription ? ' on' : ''}`}
             onClick={() => void toggleTranscript()}
-            disabled={aiBusy || aiStopping}
+            disabled={aiBusy || aiStopping || (!transcription && !callMarked)}
             aria-pressed={!!transcription}
             aria-label={transcription ? 'Остановить стенограмму' : 'Включить стенограмму (ИИ)'}
             title={transcription ? 'Остановить стенограмму' : `Стенограмма и черновик протокола (ИИ-«Секретарь»)${secretary ? `, итоги ~${secretary.eta_minutes} мин после звонка` : ''}`}

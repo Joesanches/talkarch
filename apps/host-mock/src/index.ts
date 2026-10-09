@@ -11,6 +11,8 @@ const mock = createHostMock({
   chatUrl: env.CHAT_WEB_URL ?? 'http://localhost:5173',
   stepMs: Number(env.STEP_MS ?? 3000),
   serverName: env.HS_SERVER_NAME ?? 'konsilium.test',
+  // Демо-агент «Секретаря» — с токеном агента, как у сервиса контекста (SECRETARY_TOKEN).
+  secretaryToken: env.SECRETARY_TOKEN ?? 'dev-only-secretary-token-0123456789',
   logger: true,
   connectors: [
     { id: 'lis', token: env.LIS_TOKEN ?? 'dev-only-lis-token-0123456789abcdef', callbackToken: env.LIS_CALLBACK_TOKEN ?? 'dev-only-lis-callback-token-0123456789' },

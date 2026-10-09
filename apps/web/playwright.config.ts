@@ -36,7 +36,12 @@ const devEnv = {
         LLM_URL: 'http://localhost:12434/engines/v1',
         LLM_MODEL: 'ai/qwen3:1.7b-q4_K_M',
       }
-    : {}),
+    : {
+        // Без профиля ai — демо-агент «Секретаря» из песочницы: сценарий реплик вместо распознавания (консилиум).
+        SECRETARY_URL: 'http://localhost:8090/demo/secretary',
+        SECRETARY_TOKEN: 'dev-only-secretary-token-0123456789',
+        AI_PROFILE: 'cpu',
+      }),
 } as Record<string, string>;
 
 // Браузер окружения (Chromium из /opt/pw-browsers), если версия Playwright не совпадает с установленной.

@@ -202,6 +202,22 @@ describe('ИИ-«Секретарь» в сервисе контекста', () 
     expect((await api('smirnova', { roomId, action: 'start' })).statusCode).toBe(200);
   });
 
+  it('сервис перезапускался посреди стенограммы — «Остановить» снимает оставшийся индикатор; без индикатора — 409', async () => {
+    const roomId = await withAgent(null);
+    expect((await api('smirnova', { roomId, action: 'stop' })).statusCode).toBe(409);
+    // Индикатор от прошлого процесса сервиса: сессии в памяти уже нет.
+    await h.matrix.sendState(roomId, EventType.Call, 'main', {
+      call_id: 'main',
+      kind: 'consilium',
+      started_by: mx('smirnova'),
+      started_at: '2026-10-09T10:00:00Z',
+      transcription: { started_by: mx('smirnova'), started_at: '2026-10-09T10:00:00Z', profile: 'cpu' },
+    });
+    expect((await api('smirnova', { roomId, action: 'stop' })).statusCode).toBe(200);
+    expect((await h.matrix.getState<Record<string, unknown>>(roomId, EventType.Call, 'main'))?.transcription).toBeUndefined();
+    expect(h.matrix.messages(roomId).at(-1)!.content.body).toBe('Стенограмма прервана: сервис перезапускался, запись не сохранена.');
+  });
+
   it('LLM недоступна — черновик по шаблону', async () => {
     const roomId = await withAgent({ model: 'down', complete: async () => Promise.reject(new Error('ECONNREFUSED')) });
     await api('smirnova', { roomId, action: 'start' });

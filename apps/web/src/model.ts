@@ -5,13 +5,19 @@ import {
   CaseArchiveContent,
   CaseContext,
   CaseRole,
+  ConsiliumContent,
+  ConsiliumCurrentContent,
   CriticalStatusContent,
   EventType,
   MsgType,
   NotificationField,
   NotificationInfo,
+  ReportDeliveryContent,
   RoomType,
+  consiliumRoleName,
+  type ConsiliumMember,
   type RequestStep,
+  type TranscriptSegment,
 } from '@konsilium/protocol';
 
 export type Folder = 'all' | 'cases' | 'direct' | 'channels' | 'service' | 'archive';
@@ -30,7 +36,8 @@ export const FOLDERS: ReadonlyArray<{ id: Folder; label: string }> = [
 export function foldersOf(room: { roomType?: string; isDirect: boolean }): Folder[] {
   const out: Folder[] = ['all'];
   if (room.roomType === RoomType.Case) out.push('cases');
-  if (room.roomType === RoomType.Channel) out.push('channels');
+  // Консилиум — группа врачей с повесткой, как в макете: рядом с каналами и группами.
+  if (room.roomType === RoomType.Channel || room.roomType === RoomType.Consilium) out.push('channels');
   if (room.roomType === RoomType.Service) out.push('service');
   if (room.isDirect) out.push('direct');
   return out;
@@ -178,6 +185,13 @@ export function preview(e: TimelineItem | undefined, senderName: string, isMine:
   if (e.type !== 'm.room.message') return '';
   const first = String(e.content.body ?? '').split('\n')[0] ?? '';
   if (e.content.msgtype === 'm.notice') return first;
+  // Итоги ИИ-«Секретаря» и протоколы — подписью, а не первой строкой служебного текста.
+  if (e.content.msgtype === MsgType.Transcript) return 'Стенограмма звонка';
+  if (e.content.msgtype === MsgType.Report) {
+    const r = e.content[MsgType.Report] as { status?: string; agenda?: { index: number; total: number } } | undefined;
+    if (r?.status === 'accepted') return 'Протокол консилиума принят';
+    return r?.agenda ? `Черновик протокола · случай ${r.agenda.index + 1} из ${r.agenda.total}` : 'Черновик протокола консилиума';
+  }
   const label: Record<string, string> = { 'm.image': 'Изображение', 'm.file': 'Файл', [MsgType.SlideRoi]: 'Препарат', [MsgType.KeyImage]: 'Ключевой снимок' };
   const kind = label[String(e.content.msgtype)];
   const body = kind ? `${kind}: ${first}` : stripReplyFallback(String(e.content.body ?? '')).split('\n')[0];
@@ -303,6 +317,56 @@ export function reportDecisions(items: TimelineItem[]): Map<string, ReportDecisi
   }
   return out;
 }
+
+// ── Консилиум ────────────────────────────────────────────────────────────────
+
+export function parseConsilium(raw: unknown): ConsiliumContent | null {
+  const r = ConsiliumContent.safeParse(raw);
+  return r.success ? r.data : null;
+}
+
+/** Текущий случай повестки; нет отметки — первый. */
+export function parseConsiliumCurrent(raw: unknown, total: number): number {
+  const r = ConsiliumCurrentContent.safeParse(raw);
+  return r.success && r.data.index < total ? r.data.index : 0;
+}
+
+/** Ведущий консилиума — председатель или секретарь: переключает случаи и принимает протоколы. */
+export const isConsiliumLead = (c: ConsiliumContent | null, userId: string) => !!c && (c.members[userId]?.role ?? 'member') !== 'member';
+
+/** Подпись участника: «председатель», «докладчик, онколог», «химиотерапевт, НМИЦ · дистанционно». */
+export function consiliumMemberLabel(m: ConsiliumMember | undefined, presenter = false): string {
+  const parts = [m && m.role !== 'member' ? consiliumRoleName(m.role) : null, presenter ? 'докладчик' : null, m?.title ?? null].filter(Boolean);
+  return `${parts.join(', ') || 'участник'}${m?.remote ? ' · дистанционно' : ''}`;
+}
+
+/** «3 случая», «1 участник», «5 участников». */
+export function plural(n: number, [one, few, many]: readonly [string, string, string]): string {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  return `${n} ${m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many}`;
+}
+
+/** Передача принятых протоколов в МИС (`ru.vendor.report.delivery` от сервиса): черновик → итог. */
+export function reportDeliveries(items: TimelineItem[]): Map<string, ReportDeliveryContent> {
+  const out = new Map<string, ReportDeliveryContent>();
+  for (const e of items) {
+    if (e.type !== EventType.ReportDelivery) continue;
+    const r = ReportDeliveryContent.safeParse(e.content);
+    if (r.success) out.set(r.data['m.relates_to'].event_id, r.data);
+  }
+  return out;
+}
+
+export function deliveryText(d: ReportDeliveryContent): string {
+  const where = d.system ?? 'МИС';
+  if (d.status === 'failed') return d.note ?? `${where}: протокол не принят`;
+  if (d.status === 'signed') return `Протокол подписан в ${where}${d.protocol_id ? ` · ${d.protocol_id}` : ''}`;
+  return `Отправлено в ${where} как черновик протокола · ожидает подписей${d.signers !== undefined ? ` ${plural(d.signers, ['участника', 'участников', 'участников'])}` : ''}`;
+}
+
+/** Фрагменты стенограммы консилиума по случаю повестки. */
+export const caseSegments = (segments: Iterable<TranscriptSegment>, index: number) => [...segments].filter((s) => s.case === index);
 
 /** Смещение от начала звонка: «4:05». */
 export function offsetLabel(seconds: number): string {

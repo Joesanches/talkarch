@@ -41,7 +41,7 @@ render() { # render <шаблон> <файл>
   content=$(<"$src")
   for var in DOMAIN DOMAIN_RE PG_PASSWORD REG_SECRET MACAROON_SECRET FORM_SECRET AS_TOKEN HS_TOKEN ALIAS_SECRET \
     LIVEKIT_KEY LIVEKIT_SECRET LIVEKIT_IP LIS_TOKEN LIS_TOKEN_SHA RIS_TOKEN RIS_TOKEN_SHA TEAM_TOKEN_SHA \
-    LIS_CALLBACK_TOKEN DEMO_PASSWORD EMBED_ORIGINS_JSON AI_ENV OIDC_SECRET OIDC_YAML ARCHIVE_AFTER_DAYS; do
+    LIS_CALLBACK_TOKEN DEMO_PASSWORD EMBED_ORIGINS_JSON AI_ENV OIDC_SECRET OIDC_YAML ARCHIVE_AFTER_DAYS SECRETARY_TOKEN; do
     content=${content//"__${var}__"/"${!var}"}
   done
   printf '%s\n' "$content" >"$dst"
@@ -169,7 +169,12 @@ CCS_CALLBACK_URL=http://ccs:8080
 LLM_URL=${LLM_URL:-http://llm:12434/engines/v1}
 LLM_MODEL=${LLM_MODEL:-ai/qwen3:1.7b-q4_K_M}"
   else
-    AI_ENV='# ИИ-«Секретарь» выключен (AI=off)'
+    # Без ИИ консилиум всё равно можно пройти: демо-агент песочницы отдаёт сценарий реплик вместо распознавания речи.
+    AI_ENV="# ИИ-«Секретарь» на стенде выключен (AI=off): стенограмма — демо-агент песочницы (сценарий реплик).
+SECRETARY_URL=http://host-mock:8090/demo/secretary
+SECRETARY_TOKEN=$SECRETARY_TOKEN
+AI_PROFILE=external
+CCS_CALLBACK_URL=http://ccs:8080"
   fi
   if [[ $SSO == keycloak ]]; then
     # Браузер идёт на https://домен/auth, Synapse — напрямую в Keycloak внутри сети стенда (поэтому без проверки https
