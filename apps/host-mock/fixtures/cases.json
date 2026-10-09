@@ -1,5 +1,5 @@
 {
-  "$comment": "Случаи песочницы РИС/ЛИС. Все данные вымышлены. snapshot уходит в сервис контекста событием case.upserted; host_only остаётся в «системе-источнике» и отдаётся только через обратные вызовы.",
+  "$comment": "Случаи песочницы РИС/ЛИС. Все данные вымышлены. snapshot уходит в сервис контекста событием case.upserted; host_only остаётся в «системе-источнике» и отдаётся только через обратные вызовы. consilia — консилиумы «МИС» (событие consilium.upserted): номер и дата подставляются при отправке (на сегодня).",
   "connectors": {
     "lis": {
       "cases": [
@@ -95,6 +95,77 @@
               "birth_date": "1965-11-02"
             }
           }
+        }
+      ],
+      "consilia": [
+        {
+          "consilium_id": "OK",
+          "title": "Онкоконсилиум",
+          "time": "14:00",
+          "form": "mixed",
+          "members": [
+            {
+              "user": {
+                "login": "belova"
+              },
+              "role": "chair",
+              "title": "заведующая онкологическим отделением"
+            },
+            {
+              "user": {
+                "login": "petrov"
+              },
+              "role": "secretary",
+              "title": "онколог"
+            },
+            {
+              "user": {
+                "login": "kolesnikov"
+              },
+              "title": "онколог"
+            },
+            {
+              "user": {
+                "login": "smirnova"
+              },
+              "title": "патоморфолог"
+            },
+            {
+              "user": {
+                "login": "orlov"
+              },
+              "title": "рентгенолог"
+            },
+            {
+              "user": {
+                "login": "gusev"
+              },
+              "title": "химиотерапевт, НМИЦ",
+              "remote": true
+            }
+          ],
+          "agenda": [
+            {
+              "case_id": "Г26-04512",
+              "presenter": {
+                "login": "kolesnikov"
+              },
+              "purpose": "Определение тактики лечения впервые выявленного рака левой молочной железы"
+            },
+            {
+              "connector": "ris",
+              "case_id": "A26-118737",
+              "presenter": {
+                "login": "orlov"
+              }
+            },
+            {
+              "case_id": "Г26-04530",
+              "presenter": {
+                "login": "smirnova"
+              }
+            }
+          ]
         }
       ]
     },

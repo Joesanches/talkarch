@@ -5,6 +5,7 @@ import { CallTokenService } from './calls.ts';
 import { CaseDirectory, InMemoryCaseRegistry } from './cases.ts';
 import { CaseRoomService, InMemoryCaseRoomStore } from './caseRooms.ts';
 import { loadConfig, type Config } from './config.ts';
+import { ConsiliumService } from './consilia.ts';
 import { ConnectorRegistry, UserResolver, type Connector } from './connectors.ts';
 import { CriticalService, InMemoryCriticalStore } from './critical.ts';
 import { createPool, ensureDatabase, migrate, PgArchiveStore, PgCaseRegistry, PgCaseRoomStore, PgCriticalStore, PgProcessedEvents, PgRequestStore } from './db.ts';
@@ -70,6 +71,7 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
     asrUrl: config.ai.asrUrl,
     llm: opts.llm !== undefined ? opts.llm : config.ai.llm ? new OpenAiCompatibleLlm(config.ai.llm.url, config.ai.llm.model, config.ai.llm.timeoutMs) : null,
   });
+  const consilia = new ConsiliumService({ matrix, directory, caseRooms, users, log, aliasSecret: config.aliasSecret, serverName: config.serverName });
   const app = buildApp({
     hsToken: config.hsToken,
     chatWebUrl: config.chatWebUrl,
@@ -80,8 +82,8 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
     registry,
     caseRooms,
     calls,
-    events: new EventProcessor({ matrix, directory, requests, users, critical, archive, log }),
-    integration: new IntegrationService({ matrix, directory, registry, caseRooms, requests, processed, critical, log }),
+    events: new EventProcessor({ matrix, directory, requests, users, critical, archive, consilia, secretary, log }),
+    integration: new IntegrationService({ matrix, directory, registry, caseRooms, requests, processed, critical, consilia, log }),
     secretary,
     critical,
     archive,
@@ -128,7 +130,7 @@ export function createService(config: Config, opts: ServiceOptions = {}) {
         .catch((err) => app.log.warn({ err }, 'Ping Application Service не прошёл'));
     });
   }
-  return { app, matrix, connectors, registry, caseRooms, calls, directory, secretary, critical, archive };
+  return { app, matrix, connectors, registry, caseRooms, calls, directory, secretary, critical, archive, consilia };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

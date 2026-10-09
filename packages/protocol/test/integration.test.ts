@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CaseSnapshot, CloudEvent, IntegrationEventType, NotificationPosted, UserRef, eventDataSchemas } from '../src/integration.ts';
+import { CaseSnapshot, CloudEvent, ConsiliumUpserted, IntegrationEventType, NotificationPosted, UserRef, eventDataSchemas } from '../src/integration.ts';
 
 const snapshot = {
   case_id: 'Г26-04512',
@@ -49,5 +49,24 @@ describe('CloudEvent', () => {
 describe('NotificationPosted', () => {
   it('по умолчанию не создаёт чат', () => {
     expect(NotificationPosted.parse({ case_id: 'X', text: 'Готово' })).toMatchObject({ ensure_chat: false, category: 'info', links: [] });
+  });
+});
+
+describe('ConsiliumUpserted', () => {
+  const consilium = {
+    consilium_id: 'OK-118',
+    version: 1,
+    title: 'Онкоконсилиум',
+    scheduled_at: '2026-10-09T14:00:00+03:00',
+    members: [{ user: { login: 'belova' }, role: 'chair' }, { user: { login: 'kolesnikov' } }],
+    agenda: [{ case_id: 'Г26-04512', presenter: { login: 'kolesnikov' } }],
+    updated_at: '2026-10-08T16:00:00+03:00',
+  };
+
+  it('без председателя не принимается; роль по умолчанию — участник, форма — очно', () => {
+    expect(ConsiliumUpserted.parse(consilium)).toMatchObject({ form: 'in_person', members: [{ role: 'chair' }, { role: 'member' }] });
+    const noChair = ConsiliumUpserted.safeParse({ ...consilium, members: [{ user: { login: 'kolesnikov' }, role: 'secretary' }] });
+    expect(noChair.success).toBe(false);
+    expect(ConsiliumUpserted.safeParse({ ...consilium, agenda: [] }).success).toBe(false);
   });
 });

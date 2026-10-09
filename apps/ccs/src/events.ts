@@ -1,12 +1,14 @@
-import { CaseContext, EventType, MsgType, RequestMessage, type RequestStatusContent } from '@konsilium/protocol';
+import { CaseContext, ConsiliumCurrentContent, EventType, MsgType, RequestMessage, type RequestStatusContent } from '@konsilium/protocol';
 import type { ArchiveService } from './archive.ts';
 import type { CaseDirectory } from './cases.ts';
+import type { ConsiliumService } from './consilia.ts';
 import type { CriticalService } from './critical.ts';
 import type { UserResolver } from './connectors.ts';
 import { HostError } from './host.ts';
 import { isTransient } from './integration.ts';
 import { MatrixError, type MatrixApi } from './matrix.ts';
 import type { RequestStore } from './requests.ts';
+import type { SecretaryService } from './secretary.ts';
 
 export interface MatrixEvent {
   event_id: string;
@@ -15,6 +17,8 @@ export interface MatrixEvent {
   type: string;
   state_key?: string;
   content: Record<string, unknown>;
+  /** Время сервера Matrix, мс. */
+  origin_server_ts?: number;
 }
 
 export interface Logger {
@@ -45,6 +49,8 @@ export class EventProcessor {
       users: UserResolver;
       critical: CriticalService;
       archive: ArchiveService;
+      consilia: ConsiliumService;
+      secretary: SecretaryService;
       log: Logger;
     },
   ) {}
@@ -55,6 +61,12 @@ export class EventProcessor {
     if (fromUser && event.type === 'm.room.message' && event.content.msgtype === MsgType.Request) await this.onRequest(event);
     if (fromUser && event.type === 'm.room.message' && event.content.msgtype === MsgType.Critical) await this.deps.critical.onMessage(event);
     if (fromUser && event.type === EventType.Ack) await this.deps.critical.onAck(event);
+    // Консилиум: переключение текущего случая (права — уровень 50 в комнате) и принятие протокола по случаю.
+    if (fromUser && event.type === EventType.ConsiliumCurrent && event.state_key === '') {
+      const current = ConsiliumCurrentContent.safeParse(event.content);
+      if (current.success) this.deps.secretary.onAgendaSwitch(event.room_id, current.data.index, event.origin_server_ts ?? Date.now());
+    }
+    if (fromUser && event.type === EventType.ReportStatus) await this.deps.consilia.onReportStatus(event);
     // Активность пользователей отодвигает архив закрытого случая.
     if (fromUser) await this.deps.archive.onActivity(event.room_id).catch((err) => this.deps.log.warn({ err }, 'Активность чата не записана'));
     // Отмечаем только после успешной обработки: при повторе транзакции событие обработается снова.

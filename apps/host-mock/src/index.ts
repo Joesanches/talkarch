@@ -10,6 +10,7 @@ const mock = createHostMock({
   ccsUrl: env.CCS_URL ?? 'http://localhost:8080',
   chatUrl: env.CHAT_WEB_URL ?? 'http://localhost:5173',
   stepMs: Number(env.STEP_MS ?? 3000),
+  serverName: env.HS_SERVER_NAME ?? 'konsilium.test',
   logger: true,
   connectors: [
     { id: 'lis', token: env.LIS_TOKEN ?? 'dev-only-lis-token-0123456789abcdef', callbackToken: env.LIS_CALLBACK_TOKEN ?? 'dev-only-lis-callback-token-0123456789' },
@@ -25,6 +26,9 @@ for (let attempt = 1; attempt <= 30; attempt++) {
     const results = await mock.pushCases();
     for (const [connector, r] of Object.entries(results)) {
       mock.app.log.info({ connector, status: r.status, results: r.body?.results }, 'Снимки случаев отправлены');
+    }
+    for (const [connector, r] of Object.entries(await mock.pushConsilia())) {
+      mock.app.log.info({ connector, status: r.status, results: r.body?.results }, 'Консилиумы отправлены');
     }
     break;
   } catch {

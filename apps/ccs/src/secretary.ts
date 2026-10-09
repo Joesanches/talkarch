@@ -10,11 +10,14 @@ import { z } from 'zod';
 import {
   CallState,
   CaseContext,
+  ConsiliumContent,
+  ConsiliumCurrentContent,
   DraftStatement,
   EventType,
   MsgType,
   ProtocolDraft,
   TranscriptSegment,
+  consiliumRoleName,
   type CaseRolesContent,
   type TranscriptMessage,
 } from '@konsilium/protocol';
@@ -192,15 +195,20 @@ export function templateSections(segments: TranscriptSegment[]): Sections {
   return { purpose: [], clinical: [], discussion, decision: [], dissent: [] };
 }
 
-const time = (iso: string) => new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
-const date = (iso: string) => new Date(iso).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' });
+const time = (at: string | number) => new Date(at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+const date = (at: string | number) => new Date(at).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' });
 
-/** Текст черновика для любых Matrix-клиентов (`body`). */
+const formName = { remote: 'дистанционно', in_person: 'очно', mixed: 'очно и дистанционно' } as const;
+
+/** Текст черновика (или принятого протокола) для любых Matrix-клиентов (`body`). */
 export function protocolBody(draft: ProtocolDraft[typeof MsgType.Report]): string {
   const lines = [
-    'ЧЕРНОВИК ПРОТОКОЛА КОНСИЛИУМА (ИИ) — проверьте перед принятием',
-    `Дата: ${draft.meeting.date}, ${draft.meeting.start}–${draft.meeting.end}, ${draft.meeting.form === 'remote' ? 'дистанционно' : 'очно'}`,
+    draft.status === 'accepted' && draft.accepted
+      ? `ПРОТОКОЛ КОНСИЛИУМА — принят: ${draft.accepted.name}, ${date(draft.accepted.at)} ${time(draft.accepted.at)}; подписание — в МИС`
+      : 'ЧЕРНОВИК ПРОТОКОЛА КОНСИЛИУМА (ИИ) — проверьте перед принятием',
+    `Дата: ${draft.meeting.date}, ${draft.meeting.start}–${draft.meeting.end}, ${formName[draft.meeting.form]}`,
   ];
+  if (draft.agenda) lines.push(`Консилиум: ${draft.agenda.consilium}, случай ${draft.agenda.index + 1} из ${draft.agenda.total}`);
   if (draft.case) lines.push(`Случай: ${draft.case.case_id} · ${draft.case.title} · пациент ${draft.case.patient}`);
   lines.push(`Состав: ${draft.participants.map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(', ') || '—'}`);
   const section = (title: string, items: DraftStatement[]) => {
@@ -225,6 +233,23 @@ interface Session {
   callId: string;
   startedBy: string;
   startedAt: number;
+  /** Консилиум: повестка и отметки текущего случая (время сервера Matrix, мс) — по ним делится стенограмма. */
+  consilium?: { content: ConsiliumContent; marks: Array<{ index: number; at: number }> };
+}
+
+/**
+ * Номер случая повестки для каждого фрагмента: последняя отметка не позже начала фрагмента.
+ * Фрагменты до первой отметки относятся к случаю, который был текущим при включении стенограммы.
+ */
+export function splitByAgenda(segments: TranscriptSegment[], startedAt: string, marks: Array<{ index: number; at: number }>): TranscriptSegment[] {
+  const sorted = [...marks].sort((a, b) => a.at - b.at);
+  const t0 = Date.parse(startedAt);
+  return segments.map((seg) => {
+    const at = t0 + seg.start_ms;
+    let index = sorted[0]?.index ?? 0;
+    for (const m of sorted) if (m.at <= at) index = m.index;
+    return { ...seg, case: index };
+  });
 }
 
 /** Агент сам завершает сессию через 4 часа; сессия старше — потеряна (агент упал, не дозвонился). */
@@ -277,9 +302,11 @@ export class SecretaryService {
     if (!this.enabled) throw new SecretaryError(501, 'ИИ-«Секретарь» выключен политикой организации');
     const userId = await this.ensureMember(userToken, roomId);
     if (this.sessionFor(roomId)) throw new SecretaryError(409, 'Стенограмма уже ведётся');
-    // Итоги публикует сервис — значит, он должен быть в комнате: это чаты случаев, которые он создаёт.
+    // Итоги публикует сервис — значит, он должен быть в комнате: это чаты случаев и консилиумы, которые он создаёт.
     const ctx = await this.deps.matrix.getState(roomId, EventType.CaseContext).catch(() => null);
-    if (!CaseContext.safeParse(ctx).success) throw new SecretaryError(409, 'Стенограмма доступна в чатах случаев');
+    const consilium = ConsiliumContent.safeParse(await this.deps.matrix.getState(roomId, EventType.Consilium).catch(() => null));
+    if (!CaseContext.safeParse(ctx).success && !consilium.success) throw new SecretaryError(409, 'Стенограмма доступна в чатах случаев и консилиумах');
+    const current = ConsiliumCurrentContent.safeParse(await this.deps.matrix.getState(roomId, EventType.ConsiliumCurrent).catch(() => null));
 
     const sessionId = randomUUID();
     const token = await this.deps.calls.agentToken(roomId, callId, `secretary-${sessionId.slice(0, 8)}`, 'Секретарь (запись речи)');
@@ -299,7 +326,13 @@ export class SecretaryService {
       throw new SecretaryError(503, `Секретарь недоступен: ${e.message}`);
     });
     if (!res.ok) throw new SecretaryError(503, `Секретарь ответил ${res.status}`);
-    this.sessions.set(sessionId, { roomId, callId, startedBy: userId, startedAt: Date.now() });
+    this.sessions.set(sessionId, {
+      roomId,
+      callId,
+      startedBy: userId,
+      startedAt: Date.now(),
+      ...(consilium.success ? { consilium: { content: consilium.data, marks: [{ index: current.success ? current.data.index : 0, at: Date.now() }] } } : {}),
+    });
 
     await this.setTranscription(roomId, callId, { started_by: userId, started_at: new Date().toISOString(), profile: this.deps.profile as 'gpu' | 'cpu' | 'external' }, userId);
     await this.deps.matrix.sendEvent(roomId, 'm.room.message', {
@@ -323,6 +356,13 @@ export class SecretaryService {
     if (res?.status === 404) await this.abandon(sessionId, 'Стенограмма прервана: агент «Секретаря» перезапускался, запись не сохранена.');
   }
 
+  /** Председатель или секретарь переключил текущий случай повестки (время — с сервера Matrix). */
+  onAgendaSwitch(roomId: string, index: number, at: number): void {
+    const id = this.sessionFor(roomId);
+    const c = id ? this.sessions.get(id)?.consilium : undefined;
+    if (c && index < c.content.agenda.length) c.marks.push({ index, at });
+  }
+
   private async abandon(sessionId: string, notice: string) {
     const session = this.sessions.get(sessionId);
     if (!session) return;
@@ -344,8 +384,11 @@ export class SecretaryService {
       await this.deps.matrix.sendEvent(session.roomId, 'm.room.message', { msgtype: 'm.notice', body: 'Стенограмма звонка пуста: речь не распознана.' });
       return { transcriptEventId: '', draft: Promise.resolve() };
     }
+    if (session.consilium) result = { ...result, segments: splitByAgenda(result.segments, result.started_at, session.consilium.marks) };
     const transcriptEventId = await this.postTranscript(session, result);
-    const draft = this.postDraft(session, result, transcriptEventId).catch((err) => this.deps.log.error({ err }, 'Черновик протокола не подготовлен'));
+    const draft = (session.consilium ? this.postConsiliumDrafts(session, session.consilium.content, result, transcriptEventId) : this.postDraft(session, result, transcriptEventId)).catch(
+      (err) => this.deps.log.error({ err }, 'Черновик протокола не подготовлен'),
+    );
     return { transcriptEventId, draft };
   }
 
@@ -396,6 +439,81 @@ export class SecretaryService {
     return this.deps.matrix.sendEvent(session.roomId, 'm.room.message', content as unknown as Record<string, unknown>, `transcript.${result.session_id}`);
   }
 
+  /** Разделы черновика: LLM по стенограмме (с ролями говорящих) или шаблон, если LLM нет или ответ не прошёл проверку. */
+  private async draftSections(segments: TranscriptSegment[], roleOf: (mxid: string) => string | undefined): Promise<{ sections: Sections; model?: string }> {
+    if (this.deps.llm) {
+      const transcript = segments.map((s) => `[${s.i}] ${s.name}${roleOf(s.speaker) ? ` (${roleOf(s.speaker)})` : ''}: ${s.text}`).join('\n');
+      try {
+        // Только стенограмма: сведения о случае подставит система, модели их знать не нужно.
+        const answer = await this.deps.llm.complete(SYSTEM_PROMPT, `Стенограмма:\n${transcript}\nОтвет:`);
+        const sections = parseLlmSections(answer, segments);
+        if (sections) return { sections, model: this.deps.llm.model };
+        // Без содержимого ответа: в нём клиническое обсуждение.
+        this.deps.log.warn({ chars: answer.length, json: firstJsonObject(answer) !== undefined }, 'Ответ LLM не прошёл проверку — черновик по шаблону');
+      } catch (err) {
+        this.deps.log.warn({ err }, 'LLM недоступна — черновик по шаблону');
+      }
+    }
+    return { sections: templateSections(segments) };
+  }
+
+  /**
+   * Консилиум: черновик на каждый случай повестки, который обсуждали, — в комнату консилиума. Пациент и случай —
+   * из повестки, состав — из данных консилиума (роли: председатель, секретарь, докладчик), разделы — по фрагментам
+   * стенограммы этого случая.
+   */
+  private async postConsiliumDrafts(session: Session, consilium: ConsiliumContent, result: SecretaryResult, transcriptEventId: string) {
+    const names = new Map<string, string>();
+    for (const p of result.participants) if (p.identity.startsWith('@')) names.set(p.identity, p.name);
+    for (const s of result.segments) names.set(s.speaker, s.name);
+    for (const id of Object.keys(consilium.members)) {
+      if (!names.has(id)) names.set(id, (await this.deps.matrix.displayName(id).catch(() => null)) ?? id);
+    }
+    const total = consilium.agenda.length;
+    const skipped: number[] = [];
+    for (const [index, item] of consilium.agenda.entries()) {
+      const segments = result.segments.filter((s) => s.case === index);
+      if (!segments.length) {
+        skipped.push(index + 1);
+        continue;
+      }
+      const roleOf = (mxid: string) => {
+        const m = consilium.members[mxid];
+        const parts = [m && m.role !== 'member' ? consiliumRoleName(m.role) : null, item.presenter === mxid ? 'докладчик' : null, m?.title ?? null].filter(Boolean);
+        return parts.length ? parts.join(', ') : undefined;
+      };
+      const { sections, model } = await this.draftSections(segments, roleOf);
+      const speakers = [...new Set(segments.map((s) => s.speaker))].filter((id) => !consilium.members[id]);
+      const draft: ProtocolDraft[typeof MsgType.Report] = {
+        kind: 'consilium_protocol',
+        status: 'draft',
+        generated_by: model ? 'llm' : 'template',
+        ...(model ? { model } : {}),
+        ...(transcriptEventId ? { transcript_event_id: transcriptEventId } : {}),
+        meeting: { date: date(result.started_at), start: time(segments[0]!.start_ms + Date.parse(result.started_at)), end: time(segments.at(-1)!.end_ms + Date.parse(result.started_at)), form: consilium.form },
+        participants: [...Object.keys(consilium.members), ...speakers].map((mxid) => ({
+          mxid,
+          name: names.get(mxid) ?? mxid,
+          ...(roleOf(mxid) ? { role: roleOf(mxid) } : {}),
+          ...(consilium.members[mxid]?.remote ? { remote: true } : {}),
+        })),
+        case: { connector: item.connector, case_id: item.case_id, title: item.title, patient: item.patient.masked },
+        agenda: { index, total, consilium: consilium.title },
+        sections,
+      };
+      const content = ProtocolDraft.parse({ msgtype: MsgType.Report, body: protocolBody(draft), [MsgType.Report]: draft });
+      await this.deps.matrix.sendEvent(session.roomId, 'm.room.message', content as unknown as Record<string, unknown>, `draft.${result.session_id}.${index}`);
+    }
+    if (skipped.length) {
+      await this.deps.matrix.sendEvent(
+        session.roomId,
+        'm.room.message',
+        { msgtype: 'm.notice', body: `Без черновика — по стенограмме обсуждения не было: ${skipped.length > 1 ? 'случаи' : 'случай'} ${skipped.join(', ')} из ${total}.` },
+        `draft.${result.session_id}.skipped`,
+      );
+    }
+  }
+
   private async postDraft(session: Session, result: SecretaryResult, transcriptEventId: string) {
     const ctx = CaseContext.safeParse(await this.deps.matrix.getState(session.roomId, EventType.CaseContext).catch(() => null));
     const roles = ((await this.deps.matrix.getState<CaseRolesContent>(session.roomId, EventType.CaseRoles).catch(() => null))?.members ?? {}) as CaseRolesContent['members'];
@@ -403,33 +521,17 @@ export class SecretaryService {
     for (const p of result.participants) if (p.identity.startsWith('@')) speakers.set(p.identity, p.name);
     for (const s of result.segments) speakers.set(s.speaker, s.name);
 
-    let sections: Sections | null = null;
-    let model: string | undefined;
-    if (this.deps.llm) {
-      const transcript = result.segments
-        .map((s) => `[${s.i}] ${s.name}${roles[s.speaker] ? ` (${roleName(roles[s.speaker]!.role)})` : ''}: ${s.text}`)
-        .join('\n');
-      try {
-        // Только стенограмма: сведения о случае подставит система, модели их знать не нужно.
-        const answer = await this.deps.llm.complete(SYSTEM_PROMPT, `Стенограмма:\n${transcript}\nОтвет:`);
-        sections = parseLlmSections(answer, result.segments);
-        if (sections) model = this.deps.llm.model;
-        // Без содержимого ответа: в нём клиническое обсуждение.
-        else this.deps.log.warn({ chars: answer.length, json: firstJsonObject(answer) !== undefined }, 'Ответ LLM не прошёл проверку — черновик по шаблону');
-      } catch (err) {
-        this.deps.log.warn({ err }, 'LLM недоступна — черновик по шаблону');
-      }
-    }
+    const { sections, model } = await this.draftSections(result.segments, (mxid) => (roles[mxid] ? roleName(roles[mxid]!.role) : undefined));
     const draft: ProtocolDraft[typeof MsgType.Report] = {
       kind: 'consilium_protocol',
       status: 'draft',
-      generated_by: sections ? 'llm' : 'template',
+      generated_by: model ? 'llm' : 'template',
       ...(model ? { model } : {}),
       ...(transcriptEventId ? { transcript_event_id: transcriptEventId } : {}),
       meeting: { date: date(result.started_at), start: time(result.started_at), end: time(result.ended_at), form: 'remote' },
       participants: [...speakers].map(([mxid, name]) => ({ mxid, name, ...(roles[mxid] ? { role: roleName(roles[mxid]!.role) } : {}) })),
       case: ctx.success ? { connector: ctx.data.connector, case_id: ctx.data.case_id, title: ctx.data.title, patient: ctx.data.patient.masked } : null,
-      sections: sections ?? templateSections(result.segments),
+      sections,
     };
     const content = ProtocolDraft.parse({ msgtype: MsgType.Report, body: protocolBody(draft), [MsgType.Report]: draft });
     await this.deps.matrix.sendEvent(session.roomId, 'm.room.message', content as unknown as Record<string, unknown>, `draft.${result.session_id}`);

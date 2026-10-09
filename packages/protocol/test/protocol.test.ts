@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CaseContext, CriticalMessage, MsgType, caseKey, durationSeconds, parseStructured, requestFallbackBody } from '../src/index.ts';
+import { CaseContext, ConsiliumContent, CriticalMessage, MsgType, caseKey, durationSeconds, parseStructured, requestFallbackBody } from '../src/index.ts';
 
 describe('caseKey', () => {
   it('нормализует регистр номера и пробелы', () => {
@@ -122,5 +122,57 @@ describe('препарат из ЛИС (ru.vendor.slide_roi)', () => {
     const roi = { slide_id: '2', block: '1Б', stain: 'H&E', magnification: 20, region: { x: 13824, y: 8400, w: 2048, h: 2048, level: 0 }, thumbnail: 'mxc://konsilium.test/abc' };
     expect(parseStructured({ ...base, [MsgType.SlideRoi]: roi })).toMatchObject({ [MsgType.SlideRoi]: { block: '1Б', region: { w: 2048 } } });
     expect(SlideRoi.safeParse({ ...base, [MsgType.SlideRoi]: { ...roi, region: { x: 0, y: 0, w: 0, h: 10, level: 0 } } }).success).toBe(false);
+  });
+});
+
+describe('консилиум', () => {
+  const consilium = {
+    connector: 'lis',
+    consilium_id: 'OK-118',
+    title: 'Онкоконсилиум',
+    scheduled_at: '2026-10-09T14:00:00+03:00',
+    form: 'mixed',
+    members: { '@belova:x': { role: 'chair' }, '@gusev:x': { role: 'member', title: 'химиотерапевт', remote: true } },
+    agenda: [{ connector: 'lis', case_id: 'Г26-04512', source: 'LIS', title: 'Биопсия', patient: { ref: 'pseudo:1', masked: 'Н*** О. В.' }, presenter: '@kolesnikov:x' }],
+    sync: { version: 1, updated_at: '2026-10-08T16:00:00+03:00' },
+  };
+
+  it('повестка — только маска пациента; ключ состава — Matrix ID', () => {
+    expect(ConsiliumContent.safeParse(consilium).success).toBe(true);
+    expect(ConsiliumContent.safeParse({ ...consilium, members: { belova: { role: 'chair' } } }).success).toBe(false);
+    const leak = { ...consilium, agenda: [{ ...consilium.agenda[0], patient: { ref: 'pseudo:1', masked: 'Н*** О. В.', full_name: 'Нестерова' } }] };
+    expect(ConsiliumContent.safeParse(leak).success).toBe(false);
+  });
+
+  it('черновик по случаю повестки и принятая копия; фрагмент стенограммы с номером случая', () => {
+    const draft = {
+      msgtype: MsgType.Report,
+      body: 'ПРОТОКОЛ',
+      [MsgType.Report]: {
+        kind: 'consilium_protocol',
+        status: 'accepted',
+        generated_by: 'llm',
+        meeting: { date: '09.10.2026', start: '14:00', end: '14:10', form: 'mixed' },
+        participants: [{ name: 'Гусев П. Р.', mxid: '@gusev:x', role: 'химиотерапевт', remote: true }],
+        case: { connector: 'lis', case_id: 'Г26-04512', title: 'Биопсия', patient: 'Н*** О. В.' },
+        agenda: { index: 0, total: 3, consilium: 'Онкоконсилиум' },
+        accepted: { by: '@petrov:x', name: 'Петров С. В.', at: '2026-10-09T15:41:00+03:00' },
+        sections: { decision: [{ text: 'Биопсия лимфоузла', refs: [] }] },
+      },
+    };
+    expect(parseStructured(draft)?.msgtype).toBe(MsgType.Report);
+    expect(parseStructured({ ...draft, [MsgType.Report]: { ...draft[MsgType.Report], status: 'signed' } })).toBeNull();
+    const transcript = {
+      msgtype: MsgType.Transcript,
+      body: 'Стенограмма',
+      [MsgType.Transcript]: {
+        call_id: 'main',
+        started_at: '2026-10-09T11:00:00Z',
+        ended_at: '2026-10-09T11:20:00Z',
+        segments: [{ i: 0, speaker: '@kolesnikov:x', name: 'К', start_ms: 0, end_ms: 1000, text: 'а', case: 2 }],
+        asr: { engine: 'vosk', profile: 'cpu' },
+      },
+    };
+    expect((parseStructured(transcript) as any)[MsgType.Transcript].segments[0].case).toBe(2);
   });
 });

@@ -13,6 +13,8 @@ export const RoomType = {
   Service: `${NS}.service`,
   Channel: `${NS}.channel`,
   Tmk: `${NS}.tmk`,
+  /** Консилиум: повестка из нескольких случаев, состав с ролями, звонок и протоколы по случаям. */
+  Consilium: `${NS}.consilium`,
 } as const;
 
 /** Типы state- и обычных событий. */
@@ -41,6 +43,15 @@ export const EventType = {
   CaseArchive: `${NS}.case.archive`,
   Call: `${NS}.call`,
   CallInvite: `${NS}.call.invite`,
+  /** Консилиум — state-событие (state_key = ""): название, время, состав с ролями, повестка. Пишет только сервис. */
+  Consilium: `${NS}.consilium`,
+  /**
+   * Текущий случай повестки — state-событие (state_key = ""). Переключают председатель и секретарь (уровень 50);
+   * по этим отметкам «Секретарь» делит стенограмму консилиума по случаям.
+   */
+  ConsiliumCurrent: `${NS}.consilium.current`,
+  /** Принятый протокол передан в МИС: сервис отвечает ссылкой `m.reference` на черновик (уровень 100). */
+  ReportDelivery: `${NS}.report.delivery`,
 } as const;
 
 /** Собственные `msgtype` для `m.room.message` (у каждого обязателен текстовый `body`). */
@@ -184,6 +195,57 @@ export const ArchivedCase = z.object({
   archived_at: z.string().datetime({ offset: true }),
 });
 export type ArchivedCase = z.infer<typeof ArchivedCase>;
+
+/** Роль в консилиуме. Докладчик — свой у каждого случая повестки (`presenter`). */
+export const ConsiliumRole = z.enum(['chair', 'secretary', 'member']);
+export type ConsiliumRole = z.infer<typeof ConsiliumRole>;
+
+export const ConsiliumMember = z.object({
+  role: ConsiliumRole,
+  /** Должность или специальность: «онколог», «химиотерапевт». */
+  title: z.string().max(100).optional(),
+  /** Участвует дистанционно (например, из другой МО). */
+  remote: z.boolean().optional(),
+});
+export type ConsiliumMember = z.infer<typeof ConsiliumMember>;
+
+/** Случай в повестке консилиума: данные — из системы-источника случая, как в контексте чата случая. */
+export const AgendaItem = z.object({
+  connector: ConnectorId,
+  case_id: z.string().min(1),
+  source: SourceSystem,
+  title: z.string().min(1),
+  patient: PatientRef,
+  /** Докладчик (Matrix ID). */
+  presenter: z.string().startsWith('@').optional(),
+  /** Цель обсуждения, если её передала система-источник. */
+  purpose: z.string().max(500).optional(),
+});
+export type AgendaItem = z.infer<typeof AgendaItem>;
+
+export const MeetingForm = z.enum(['remote', 'in_person', 'mixed']);
+export type MeetingForm = z.infer<typeof MeetingForm>;
+
+/** State-событие `ru.vendor.consilium` (state_key = ""). */
+export const ConsiliumContent = z.object({
+  /** Подключение и номер консилиума в системе, которая его назначила (МИС, онкорегистр). */
+  connector: ConnectorId,
+  consilium_id: z.string().min(1),
+  title: z.string().min(1),
+  scheduled_at: z.string().datetime({ offset: true }),
+  form: MeetingForm,
+  members: z.record(z.string().startsWith('@'), ConsiliumMember),
+  agenda: z.array(AgendaItem).min(1).max(30),
+  sync: z.object({ version: z.number().int().nonnegative(), updated_at: z.string() }),
+});
+export type ConsiliumContent = z.infer<typeof ConsiliumContent>;
+
+/** State-событие `ru.vendor.consilium.current`: номер текущего случая повестки (с нуля). */
+export const ConsiliumCurrentContent = z.object({ index: z.number().int().nonnegative() });
+export type ConsiliumCurrentContent = z.infer<typeof ConsiliumCurrentContent>;
+
+/** Подписи ролей консилиума. */
+export const consiliumRoleName = (role: ConsiliumRole) => ({ chair: 'председатель', secretary: 'секретарь', member: 'участник' })[role];
 
 const MessageBase = z.object({ body: z.string().min(1) });
 
@@ -369,6 +431,8 @@ export const TranscriptSegment = z.object({
   start_ms: z.number().int().nonnegative(),
   end_ms: z.number().int().nonnegative(),
   text: z.string().min(1),
+  /** Стенограмма консилиума: номер случая повестки (с нуля), который обсуждали в этот момент. */
+  case: z.number().int().nonnegative().optional(),
 });
 export type TranscriptSegment = z.infer<typeof TranscriptSegment>;
 
@@ -399,13 +463,18 @@ export const ProtocolDraft = MessageBase.extend({
   msgtype: z.literal(MsgType.Report),
   [MsgType.Report]: z.object({
     kind: z.literal('consilium_protocol'),
-    status: z.literal('draft'),
+    /** `accepted` — копия принятого протокола в чате случая (сервис присылает её после принятия на консилиуме). */
+    status: z.enum(['draft', 'accepted']),
     generated_by: z.enum(['llm', 'template']),
     model: z.string().optional(),
     transcript_event_id: z.string().optional(),
-    meeting: z.object({ date: z.string(), start: z.string(), end: z.string(), form: z.enum(['remote', 'in_person', 'mixed']) }),
-    participants: z.array(z.object({ name: z.string(), mxid: z.string(), role: z.string().optional() })),
+    meeting: z.object({ date: z.string(), start: z.string(), end: z.string(), form: MeetingForm }),
+    participants: z.array(z.object({ name: z.string(), mxid: z.string(), role: z.string().optional(), remote: z.boolean().optional() })),
     case: z.object({ connector: z.string(), case_id: z.string(), title: z.string(), patient: z.string() }).nullable(),
+    /** Консилиум: место случая в повестке и название встречи. */
+    agenda: z.object({ index: z.number().int().nonnegative(), total: z.number().int().positive(), consilium: z.string() }).optional(),
+    /** Копия принятого протокола: кто принял и когда. */
+    accepted: z.object({ by: z.string(), name: z.string(), at: z.string() }).optional(),
     sections: z.object({
       purpose: z.array(DraftStatement).default([]),
       clinical: z.array(DraftStatement).default([]),
@@ -423,6 +492,19 @@ export const ReportStatusContent = z.object({
   status: z.enum(['accepted', 'rejected']),
 });
 export type ReportStatusContent = z.infer<typeof ReportStatusContent>;
+
+/** `ru.vendor.report.delivery`: принятый протокол передан в МИС (пишет сервис) — подписывают участники там. */
+export const ReportDeliveryContent = z.object({
+  'm.relates_to': z.object({ rel_type: z.literal('m.reference'), event_id: z.string().min(1) }),
+  status: z.enum(['awaiting_signatures', 'signed', 'failed']),
+  /** Номер протокола в МИС. */
+  protocol_id: z.string().optional(),
+  signers: z.number().int().nonnegative().optional(),
+  /** Куда передан: «МИС», «ЛИС». */
+  system: z.string().optional(),
+  note: z.string().max(300).optional(),
+});
+export type ReportDeliveryContent = z.infer<typeof ReportDeliveryContent>;
 
 /** Разбор `m.room.message` в один из структурированных типов; остальное — `null`. */
 export function parseStructured(

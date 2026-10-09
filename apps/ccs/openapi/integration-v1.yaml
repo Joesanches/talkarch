@@ -78,6 +78,7 @@ paths:
               requestStatusChanged: { $ref: '#/components/examples/RequestStatusChanged' }
               notificationPosted: { $ref: '#/components/examples/NotificationPosted' }
               criticalRaised: { $ref: '#/components/examples/CriticalRaised' }
+              consiliumUpserted: { $ref: '#/components/examples/ConsiliumUpserted' }
           application/json:
             schema:
               oneOf:
@@ -389,6 +390,47 @@ components:
                 description: '`notify` — подключить к чату и уведомить; `call` — звонок на пост (выполняет система-источник по обратному вызову)'
               target: { type: string, maxLength: 200, description: 'Роль в случае (`head`) или название поста' }
               users: { type: array, maxItems: 20, items: { $ref: '#/components/schemas/UserRef' } }
+    ConsiliumUpserted:
+      type: object
+      required: [consilium_id, version, title, scheduled_at, members, agenda, updated_at]
+      description: |
+        Консилиум, назначенный в МИС или онкорегистре. Сервис создаёт комнату консилиума (один раз на `consilium_id`),
+        приглашает состав, показывает повестку; председатель и секретарь переключают текущий случай и принимают протоколы.
+        Как и снимок случая, событие всегда полное; меньшая `version` — `stale`. Случаи повестки должны быть известны
+        сервису: прежде отправлены `case.upserted` или доступны обратным вызовом `GET /cases/{case_id}`.
+        Принятый протокол по каждому случаю приходит обратным вызовом `POST /consilium-protocols`.
+      properties:
+        consilium_id: { type: string, maxLength: 128, description: 'Номер консилиума в системе-источнике' }
+        version: { type: integer, minimum: 0 }
+        title: { type: string, maxLength: 200, examples: ['Онкоконсилиум · 9 октября'] }
+        scheduled_at: { type: string, format: date-time }
+        form: { type: string, enum: [remote, in_person, mixed], default: in_person }
+        members:
+          type: array
+          minItems: 1
+          maxItems: 50
+          description: Состав; нужен ровно один или несколько председателей (`chair`). Председатель и секретарь переключают случаи и принимают протоколы
+          items:
+            type: object
+            required: [user]
+            properties:
+              user: { $ref: '#/components/schemas/UserRef' }
+              role: { type: string, enum: [chair, secretary, member], default: member }
+              title: { type: string, maxLength: 100, description: 'Должность или специальность' }
+              remote: { type: boolean, description: 'Участвует дистанционно' }
+        agenda:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items:
+            type: object
+            required: [case_id]
+            properties:
+              connector: { allOf: [{ $ref: '#/components/schemas/ConnectorId' }], description: 'Подключение случая; по умолчанию — подключение события' }
+              case_id: { type: string }
+              presenter: { $ref: '#/components/schemas/UserRef' }
+              purpose: { type: string, maxLength: 500 }
+        updated_at: { type: string, format: date-time }
     CriticalFindingSummary:
       type: object
       required: [finding_id, case_id, status, raised_at, deadline_at, reported_by, overdue, escalations]
@@ -461,12 +503,20 @@ components:
           properties:
             type: { const: ru.vendor.critical.raised }
             data: { $ref: '#/components/schemas/CriticalRaised' }
+    ConsiliumUpsertedEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventBase'
+        - type: object
+          properties:
+            type: { const: ru.vendor.consilium.upserted }
+            data: { $ref: '#/components/schemas/ConsiliumUpserted' }
     Event:
       oneOf:
         - $ref: '#/components/schemas/CaseUpsertedEvent'
         - $ref: '#/components/schemas/RequestStatusChangedEvent'
         - $ref: '#/components/schemas/NotificationPostedEvent'
         - $ref: '#/components/schemas/CriticalRaisedEvent'
+        - $ref: '#/components/schemas/ConsiliumUpsertedEvent'
       discriminator:
         propertyName: type
         mapping:
@@ -474,6 +524,7 @@ components:
           ru.vendor.request.status.changed: '#/components/schemas/RequestStatusChangedEvent'
           ru.vendor.notification.posted: '#/components/schemas/NotificationPostedEvent'
           ru.vendor.critical.raised: '#/components/schemas/CriticalRaisedEvent'
+          ru.vendor.consilium.upserted: '#/components/schemas/ConsiliumUpsertedEvent'
     EventBatch:
       type: array
       minItems: 1
@@ -590,6 +641,31 @@ components:
           escalation:
             - { after: PT10M, action: call, target: Пост 2 терапии }
             - { after: PT20M, action: notify, target: head, users: [{ login: belova }] }
+    ConsiliumUpserted:
+      summary: Онкоконсилиум из трёх случаев ЛИС и РИС
+      value:
+        specversion: '1.0'
+        id: lis:consilium:OK-2026-118:v1
+        source: lis
+        type: ru.vendor.consilium.upserted
+        data:
+          consilium_id: OK-2026-118
+          version: 1
+          title: Онкоконсилиум · 9 октября
+          scheduled_at: '2026-10-09T14:00:00+03:00'
+          form: mixed
+          members:
+            - { user: { login: belova }, role: chair, title: заведующая онкологическим отделением }
+            - { user: { login: petrov }, role: secretary, title: онколог }
+            - { user: { login: kolesnikov }, title: онколог }
+            - { user: { login: smirnova }, title: патоморфолог }
+            - { user: { login: orlov }, title: рентгенолог }
+            - { user: { login: gusev }, title: 'химиотерапевт, НМИЦ', remote: true }
+          agenda:
+            - { case_id: Г26-04512, presenter: { login: kolesnikov }, purpose: Определение тактики лечения }
+            - { connector: ris, case_id: A26-118737, presenter: { login: orlov } }
+            - { case_id: Г26-04530, presenter: { login: smirnova } }
+          updated_at: '2026-10-08T16:00:00+03:00'
     CriticalFindingsResponse:
       value:
         findings:

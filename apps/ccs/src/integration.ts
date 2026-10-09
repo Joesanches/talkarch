@@ -5,6 +5,7 @@ import {
   IntegrationEventType,
   eventDataSchemas,
   type CaseSnapshot,
+  type ConsiliumUpserted,
   type CriticalRaised,
   type EventResult,
   type NotificationPosted,
@@ -13,6 +14,7 @@ import {
 import type { ZodError } from 'zod';
 import type { CaseDirectory, CaseRegistry } from './cases.ts';
 import type { CaseRoomService } from './caseRooms.ts';
+import type { ConsiliumService } from './consilia.ts';
 import type { Connector } from './connectors.ts';
 import type { CriticalService } from './critical.ts';
 import type { Logger } from './events.ts';
@@ -58,10 +60,12 @@ export class InMemoryProcessedEvents implements ProcessedEvents {
 /** Сколько случаев пакета обрабатывать одновременно. */
 const CASE_CONCURRENCY = 8;
 
-/** Ключ порядка: события одного случая — строго по очереди, разных случаев — параллельно. */
+/** Ключ порядка: события одного случая (консилиума) — строго по очереди, разных — параллельно. */
 function orderKey(item: unknown, index: number): string {
-  const caseId = (item as { data?: { case_id?: unknown } } | null)?.data?.case_id;
-  return typeof caseId === 'string' && caseId.trim() ? caseId.trim().toUpperCase() : `#${index}`;
+  const data = (item as { data?: { case_id?: unknown; consilium_id?: unknown } } | null)?.data;
+  if (typeof data?.case_id === 'string' && data.case_id.trim()) return data.case_id.trim().toUpperCase();
+  if (typeof data?.consilium_id === 'string' && data.consilium_id.trim()) return `consilium:${data.consilium_id.trim().toUpperCase()}`;
+  return `#${index}`;
 }
 
 /**
@@ -80,6 +84,7 @@ export class IntegrationService {
       requests: RequestStore;
       processed: ProcessedEvents;
       critical: CriticalService;
+      consilia: ConsiliumService;
       log: Logger;
     },
   ) {}
@@ -128,6 +133,9 @@ export class IntegrationService {
           break;
         case IntegrationEventType.CriticalRaised:
           outcome = await this.deps.critical.onRaised(connector, data.data as CriticalRaised, event.id);
+          break;
+        case IntegrationEventType.ConsiliumUpserted:
+          outcome = await this.deps.consilia.upsert(connector, data.data as ConsiliumUpserted);
           break;
         default:
           outcome = await this.notificationPosted(connector, data.data as NotificationPosted, event.id);

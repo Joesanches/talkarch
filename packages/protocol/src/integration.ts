@@ -8,7 +8,10 @@ import {
   CaseLinks,
   CaseRole,
   CaseStatus,
+  ConnectorId,
+  ConsiliumRole,
   IsoDuration,
+  MeetingForm,
   NS,
   NotificationCategory,
   NotificationLink,
@@ -24,6 +27,7 @@ export const IntegrationEventType = {
   RequestStatusChanged: `${NS}.request.status.changed`,
   NotificationPosted: `${NS}.notification.posted`,
   CriticalRaised: `${NS}.critical.raised`,
+  ConsiliumUpserted: `${NS}.consilium.upserted`,
 } as const;
 export type IntegrationEventType = (typeof IntegrationEventType)[keyof typeof IntegrationEventType];
 
@@ -134,11 +138,54 @@ export const CriticalRaised = z.object({
 });
 export type CriticalRaised = z.infer<typeof CriticalRaised>;
 
+/**
+ * Данные `consilium.upserted`: консилиум, назначенный в МИС или онкорегистре. Сервис создаёт комнату консилиума,
+ * приглашает состав и показывает повестку. Как и снимок случая, всегда полный; меньшая версия игнорируется.
+ * Случаи повестки должны быть известны сервису (`case.upserted` или обратный вызов `GET /cases/{case_id}`).
+ */
+export const ConsiliumUpserted = z
+  .object({
+    consilium_id: z.string().trim().min(1).max(128),
+    version: z.number().int().nonnegative(),
+    title: z.string().trim().min(1).max(200),
+    scheduled_at: Timestamp,
+    form: MeetingForm.default('in_person'),
+    members: z
+      .array(
+        z.object({
+          user: UserRef,
+          role: ConsiliumRole.default('member'),
+          /** Должность или специальность: «онколог», «химиотерапевт». */
+          title: z.string().trim().max(100).optional(),
+          remote: z.boolean().optional(),
+        }),
+      )
+      .min(1)
+      .max(50),
+    agenda: z
+      .array(
+        z.object({
+          /** Подключение случая; по умолчанию — то же, что у консилиума. */
+          connector: ConnectorId.optional(),
+          case_id: CaseId,
+          presenter: UserRef.optional(),
+          purpose: z.string().trim().max(500).optional(),
+        }),
+      )
+      .min(1)
+      .max(30),
+    updated_at: Timestamp,
+  })
+  .refine((c) => c.members.some((m) => m.role === 'chair'), { message: 'Нужен председатель (role: chair)', path: ['members'] });
+export type ConsiliumUpserted = z.infer<typeof ConsiliumUpserted>;
+export type ConsiliumUpsertedInput = z.input<typeof ConsiliumUpserted>;
+
 export const eventDataSchemas = {
   [IntegrationEventType.CaseUpserted]: CaseSnapshot,
   [IntegrationEventType.RequestStatusChanged]: RequestStatusChanged,
   [IntegrationEventType.NotificationPosted]: NotificationPosted,
   [IntegrationEventType.CriticalRaised]: CriticalRaised,
+  [IntegrationEventType.ConsiliumUpserted]: ConsiliumUpserted,
 } as const;
 
 /**
@@ -267,6 +314,43 @@ export const CriticalFindingEvent = z.object({
   seconds_to_ack: z.number().int().nonnegative().optional(),
 });
 export type CriticalFindingEvent = z.infer<typeof CriticalFindingEvent>;
+
+/** Раздел протокола: утверждения по порядку (позиции участников — с именем говорящего). */
+const ProtocolStatement = z.object({ speaker: z.string().optional(), text: z.string().min(1) });
+
+/**
+ * `POST {callbacks}/consilium-protocols` — протокол консилиума по случаю принят председателем или секретарём.
+ * Система, назначившая консилиум (МИС), заводит протокол и собирает подписи участников (УКЭП).
+ * Заголовок `Idempotency-Key` — ID черновика в чате консилиума.
+ */
+export const ConsiliumProtocolRequest = z.object({
+  consilium_id: z.string().min(1),
+  /** Случай повестки: подключение и номер. */
+  case: z.object({ connector: ConnectorId, case_id: CaseId }),
+  meeting: z.object({ date: z.string(), start: z.string(), end: z.string(), form: MeetingForm }),
+  participants: z.array(z.object({ user: UserRef, role: z.string().optional() })),
+  sections: z.object({
+    purpose: z.array(ProtocolStatement),
+    clinical: z.array(ProtocolStatement),
+    discussion: z.array(ProtocolStatement),
+    decision: z.array(ProtocolStatement),
+    dissent: z.array(ProtocolStatement),
+  }),
+  /** Черновик подготовлен ИИ (`llm`) или по шаблону; проверен человеком, принявшим его. */
+  generated_by: z.enum(['llm', 'template']),
+  accepted_by: UserRef,
+  accepted_at: Timestamp,
+  chat: z.object({ room_id: z.string(), event_id: z.string() }),
+});
+export type ConsiliumProtocolRequest = z.infer<typeof ConsiliumProtocolRequest>;
+
+export const ConsiliumProtocolResponse = z.object({
+  protocol_id: z.string().min(1).max(64),
+  status: z.enum(['awaiting_signatures', 'signed']),
+  /** Сколько участников должны подписать. */
+  signers: z.number().int().nonnegative().optional(),
+});
+export type ConsiliumProtocolResponse = z.infer<typeof ConsiliumProtocolResponse>;
 
 /** `GET /integration/v1/critical-findings` — находки подключения: время подтверждения и эскалации (отчёт). */
 export const CriticalFindingSummary = z.object({

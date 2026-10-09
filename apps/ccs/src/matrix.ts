@@ -35,6 +35,8 @@ export interface MatrixApi {
   getState<T = Record<string, unknown>>(roomId: string, type: string, stateKey?: string): Promise<T | null>;
   sendState(roomId: string, type: string, stateKey: string, content: Record<string, unknown>): Promise<string>;
   sendEvent(roomId: string, type: string, content: Record<string, unknown>, txnId?: string): Promise<string>;
+  /** Событие комнаты по ID глазами сервиса; `null` — нет такого. */
+  getEvent(roomId: string, eventId: string): Promise<{ sender: string; type: string; content: Record<string, unknown>; origin_server_ts: number } | null>;
   /** Отображаемое имя из профиля; `null`, если не задано. */
   displayName(userId: string): Promise<string | null>;
   /** Matrix ID владельца пользовательского токена. */
@@ -128,6 +130,15 @@ export class HttpMatrixApi implements MatrixApi {
   async sendEvent(roomId: string, type: string, content: Record<string, unknown>, txnId = newTxnId()): Promise<string> {
     const r = await this.call<{ event_id: string }>('PUT', `/rooms/${enc(roomId)}/send/${enc(type)}/${enc(txnId)}`, content);
     return r.event_id;
+  }
+
+  async getEvent(roomId: string, eventId: string) {
+    try {
+      return await this.call<{ sender: string; type: string; content: Record<string, unknown>; origin_server_ts: number }>('GET', `/rooms/${enc(roomId)}/event/${enc(eventId)}`);
+    } catch (e) {
+      if (e instanceof MatrixError && e.status === 404) return null;
+      throw e;
+    }
   }
 
   /**

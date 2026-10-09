@@ -136,6 +136,11 @@ export class FakeMatrix implements MatrixApi {
     return eventId;
   }
 
+  async getEvent(roomId: string, eventId: string) {
+    const e = this.room(roomId).events.find((x) => x.eventId === eventId);
+    return e ? { sender: this.botUserId, type: e.type, content: e.content, origin_server_ts: Date.now() } : null;
+  }
+
   async displayName(userId: string) {
     return this.profiles.get(userId) ?? null;
   }

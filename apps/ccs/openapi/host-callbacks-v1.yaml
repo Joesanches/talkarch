@@ -158,6 +158,38 @@ paths:
       responses:
         '202': { description: Принято }
         '401': { $ref: '#/components/responses/Unauthorized' }
+  /consilium-protocols:
+    post:
+      operationId: postConsiliumProtocol
+      summary: Протокол консилиума по случаю принят — завести в МИС на подпись
+      description: |
+        Председатель или секретарь проверил черновик протокола (ИИ или шаблон) рядом со стенограммой и принял его.
+        Вызов получает система, назначившая консилиум (`consilium.upserted`). Она заводит протокол по случаю и собирает
+        подписи участников (УКЭП); ответ сервис показывает в чате консилиума: «ожидает подписей N участников».
+        Данные пациента не передаются — только номер случая. Повтор с тем же `Idempotency-Key` — тот же ответ.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+          description: ID черновика протокола в чате консилиума
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConsiliumProtocolRequest' }
+            examples:
+              protocol: { $ref: '#/components/examples/ConsiliumProtocolRequest' }
+      responses:
+        '201':
+          description: Протокол заведён
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsiliumProtocolResponse' }
+              examples:
+                created: { $ref: '#/components/examples/ConsiliumProtocolResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
 components:
   securitySchemes:
     serviceToken:
@@ -268,7 +300,86 @@ components:
             users: { type: array, items: { $ref: './integration-v1.yaml#/components/schemas/UserRef' } }
         acknowledged_by: { $ref: './integration-v1.yaml#/components/schemas/UserRef' }
         seconds_to_ack: { type: integer, minimum: 0 }
+    ProtocolStatement:
+      type: object
+      required: [text]
+      properties:
+        speaker: { type: string, description: 'Говорящий — для позиций участников и особого мнения' }
+        text: { type: string }
+    ConsiliumProtocolRequest:
+      type: object
+      required: [consilium_id, case, meeting, participants, sections, generated_by, accepted_by, accepted_at, chat]
+      properties:
+        consilium_id: { type: string }
+        case:
+          type: object
+          required: [connector, case_id]
+          properties:
+            connector: { type: string }
+            case_id: { type: string }
+        meeting:
+          type: object
+          required: [date, start, end, form]
+          properties:
+            date: { type: string, examples: ['09.10.2026'] }
+            start: { type: string, examples: ['14:00'] }
+            end: { type: string, examples: ['15:20'] }
+            form: { type: string, enum: [remote, in_person, mixed] }
+        participants:
+          type: array
+          items:
+            type: object
+            required: [user]
+            properties:
+              user: { $ref: './integration-v1.yaml#/components/schemas/UserRef' }
+              role: { type: string, description: 'Роль и специальность: «председатель», «докладчик, онколог»' }
+        sections:
+          type: object
+          description: Разделы протокола; каждое утверждение подтверждено фрагментом стенограммы и проверено человеком
+          required: [purpose, clinical, discussion, decision, dissent]
+          properties:
+            purpose: { type: array, items: { $ref: '#/components/schemas/ProtocolStatement' } }
+            clinical: { type: array, items: { $ref: '#/components/schemas/ProtocolStatement' } }
+            discussion: { type: array, items: { $ref: '#/components/schemas/ProtocolStatement' } }
+            decision: { type: array, items: { $ref: '#/components/schemas/ProtocolStatement' } }
+            dissent: { type: array, items: { $ref: '#/components/schemas/ProtocolStatement' } }
+        generated_by: { type: string, enum: [llm, template], description: 'Черновик подготовлен ИИ или по шаблону' }
+        accepted_by: { $ref: './integration-v1.yaml#/components/schemas/UserRef' }
+        accepted_at: { type: string, format: date-time }
+        chat:
+          type: object
+          required: [room_id, event_id]
+          properties:
+            room_id: { type: string }
+            event_id: { type: string }
+    ConsiliumProtocolResponse:
+      type: object
+      required: [protocol_id, status]
+      properties:
+        protocol_id: { type: string, maxLength: 64, description: Номер протокола в МИС }
+        status: { type: string, enum: [awaiting_signatures, signed] }
+        signers: { type: integer, minimum: 0, description: Сколько участников должны подписать }
   examples:
+    ConsiliumProtocolRequest:
+      value:
+        consilium_id: OK-2026-118
+        case: { connector: lis, case_id: Г26-04512 }
+        meeting: { date: '09.10.2026', start: '14:00', end: '15:20', form: mixed }
+        participants:
+          - { user: { mxid: '@belova:chat.clinic.local', login: belova }, role: председатель }
+          - { user: { mxid: '@kolesnikov:chat.clinic.local', login: kolesnikov }, role: 'докладчик, онколог' }
+        sections:
+          purpose: [{ text: Определение тактики лечения }]
+          clinical: [{ text: 'Инвазивная карцинома, HER2 3+' }]
+          discussion: [{ speaker: Колесников Д. А., text: Показана неоадъювантная терапия }]
+          decision: [{ text: 'Биопсия подмышечного лимфоузла, затем неоадъювантная терапия' }]
+          dissent: []
+        generated_by: llm
+        accepted_by: { mxid: '@petrov:chat.clinic.local', login: petrov }
+        accepted_at: '2026-10-09T15:41:00+03:00'
+        chat: { room_id: '!k4Pz0WqV2mBn7cXy:chat.clinic.local', event_id: $Dr4ft0Kq1 }
+    ConsiliumProtocolResponse:
+      value: { protocol_id: ПК-2026-0412, status: awaiting_signatures, signers: 6 }
     CriticalFindingEvent:
       value:
         type: acknowledged

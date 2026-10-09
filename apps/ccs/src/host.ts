@@ -2,9 +2,11 @@ import { z } from 'zod';
 import {
   AccessCheckResponse,
   CaseSnapshot,
+  ConsiliumProtocolResponse,
   CreateRequestResponse,
   PatientRevealResponse,
   type AccessCheckRequest,
+  type ConsiliumProtocolRequest,
   type CriticalFindingEvent,
   type CreateRequestRequest,
   type PatientRevealRequest,
@@ -22,6 +24,8 @@ export interface HostCallbacks {
   revealPatient(req: PatientRevealRequest): Promise<PatientRevealResponse>;
   /** Жизненный цикл критической находки — в журнал системы-источника. Повтор с тем же ключом безопасен. */
   criticalEvent(event: CriticalFindingEvent, idempotencyKey: string): Promise<void>;
+  /** Принятый протокол консилиума по случаю — в МИС на подпись. Повтор с тем же ключом даёт тот же ответ. */
+  consiliumProtocol(req: ConsiliumProtocolRequest, idempotencyKey: string): Promise<ConsiliumProtocolResponse>;
 }
 
 /** Ошибка обратного вызова. `transient` — стоит повторить позже (сеть, 5xx, 429, тайм-аут). */
@@ -80,6 +84,12 @@ export class HttpHostCallbacks implements HostCallbacks {
   async criticalEvent(event: CriticalFindingEvent, idempotencyKey: string): Promise<void> {
     // Ответ без тела (202/204) — достаточно кода.
     await this.call('POST', '/critical-findings/events', z.unknown(), event, { 'idempotency-key': idempotencyKey });
+  }
+
+  async consiliumProtocol(req: ConsiliumProtocolRequest, idempotencyKey: string): Promise<ConsiliumProtocolResponse> {
+    const r = await this.call('POST', '/consilium-protocols', ConsiliumProtocolResponse, req, { 'idempotency-key': idempotencyKey });
+    if (!r) throw new HostError(404, 'Консилиум не найден в системе-источнике', false);
+    return r;
   }
 
   async getCase(caseId: string): Promise<CaseSnapshot | null> {
