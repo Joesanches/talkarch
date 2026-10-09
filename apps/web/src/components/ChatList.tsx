@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NotificationCountType, type MatrixClient, type Room } from 'matrix-js-sdk';
 import { EventType, RoomType } from '@konsilium/protocol';
-import { avatarColor, caseCode, criticalWaitingFor, formatListTime, initials, parseCaseContext, preview, priorityLabel } from '../model.ts';
-import { roomArchived, roomCriticals, toItem } from '../matrix.ts';
+import { avatarColor, caseCode, criticalWaitingFor, formatListTime, highlightParts, initials, parseCaseContext, preview, priorityLabel, snippet } from '../model.ts';
+import { roomArchived, roomCriticals, searchMessages, toItem, type MessageHit } from '../matrix.ts';
 import { Icon } from './Icon.tsx';
 
 const kindColor: Record<string, string> = { LIS: 'var(--color-kind-pathology)', RIS: 'var(--color-kind-radiology)', TMK: 'var(--color-kind-consilium)' };
@@ -43,21 +43,38 @@ export function ChatList(props: {
   onSelect: (room: Room) => void;
   loading: boolean;
   emptyHint: string;
+  /** Открыть найденное сообщение. Без него поиск — только по названиям чатов. */
+  onOpenEvent?: (roomId: string, eventId: string) => void;
 }) {
   const [query, setQuery] = useState('');
   const me = props.client.getUserId();
   const q = query.trim().toLowerCase();
   const rooms = q ? props.rooms.filter((r) => r.name.toLowerCase().includes(q)) : props.rooms;
 
+  // Поиск по сообщениям — на сервере, после паузы в наборе; ответ на устаревший запрос отбрасывается.
+  const [found, setFound] = useState<{ q: string; hits: MessageHit[]; count: number; terms: string[]; error?: string } | null>(null);
+  const seq = useRef(0);
+  const searchable = !!props.onOpenEvent && q.length >= 3;
+  useEffect(() => {
+    if (!searchable) return setFound(null);
+    const n = ++seq.current;
+    const t = setTimeout(() => {
+      searchMessages(props.client, q)
+        .then((r) => n === seq.current && setFound({ q, hits: r.hits, count: r.count, terms: [...r.highlights, ...q.split(/\s+/)] }))
+        .catch(() => n === seq.current && setFound({ q, hits: [], count: 0, terms: [], error: 'Поиск недоступен' }));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [props.client, q, searchable]);
+
   return (
     <aside className="list">
       <div className="list-search">
         <Icon name="search" size={18} />
-        <input placeholder="Поиск: номер случая, название" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Поиск чатов" />
+        <input placeholder={props.onOpenEvent ? 'Поиск: чаты и сообщения' : 'Поиск: номер случая, название'} value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Поиск чатов" />
       </div>
       <ul className="rooms" role="listbox" aria-label="Чаты">
         {props.loading && <li className="rooms-hint">Загрузка…</li>}
-        {!props.loading && rooms.length === 0 && <li className="rooms-hint">{q ? 'Ничего не найдено' : props.emptyHint}</li>}
+        {!props.loading && rooms.length === 0 && !searchable && <li className="rooms-hint">{q ? 'Ничего не найдено' : props.emptyHint}</li>}
         {rooms.map((room) => {
           const ctx = parseCaseContext(room.currentState.getStateEvents(EventType.CaseContext, '')?.getContent());
           const last = lastShown(room);
@@ -95,6 +112,32 @@ export function ChatList(props: {
             </li>
           );
         })}
+        {searchable && (
+          <>
+            <li className="search-section" role="presentation">
+              Сообщения{found && found.count > found.hits.length ? ` · ${found.count}` : ''}
+            </li>
+            {!found && <li className="rooms-hint">Поиск…</li>}
+            {found?.error && <li className="rooms-hint">{found.error}</li>}
+            {found && !found.error && found.hits.length === 0 && <li className="rooms-hint">Сообщений не найдено</li>}
+            {found?.hits.map((h) => {
+              const room = props.client.getRoom(h.roomId);
+              const sender = room?.getMember(h.sender)?.name ?? h.sender;
+              return (
+                <li key={h.eventId} role="option" aria-selected={false} className="search-hit" onClick={() => props.onOpenEvent!(h.roomId, h.eventId)}>
+                  <div className="search-hit-top">
+                    <b>{room?.name ?? 'Чат'}</b>
+                    <span>{formatListTime(h.ts)}</span>
+                  </div>
+                  <div className="room-preview">
+                    {sender}:{' '}
+                    {highlightParts(snippet(h.body, found.terms), found.terms).map((p, i) => (p.hit ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>))}
+                  </div>
+                </li>
+              );
+            })}
+          </>
+        )}
       </ul>
     </aside>
   );

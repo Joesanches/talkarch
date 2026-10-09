@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { EventType, MsgType, RoomType } from '@konsilium/protocol';
-import { FOLDERS, archivedLabel, avatarColor, caseCode, isArchivedState, countdown, criticalStatuses, criticalWaitingFor, foldersOf, formatDay, initials, offsetLabel, preview, reportDecisions, requestViews, type TimelineItem } from './model.ts';
+import {
+  FOLDERS,
+  archivedLabel,
+  attachmentProblem,
+  formatSize,
+  highlightParts,
+  quoteText,
+  replyTarget,
+  snippet,
+  stripReplyFallback,
+  avatarColor,
+  caseCode,
+  isArchivedState, countdown, criticalStatuses, criticalWaitingFor, foldersOf, formatDay, initials, offsetLabel, preview, reportDecisions, requestViews, type TimelineItem } from './model.ts';
 
 const item = (eventId: string, type: string, content: Record<string, unknown>, sender = '@smirnova:konsilium.test'): TimelineItem => ({
   eventId,
@@ -159,5 +171,67 @@ describe('критические находки', () => {
     const now = Date.parse('2026-10-08T10:02:17Z');
     expect(countdown('2026-10-08T10:10:00Z', now)).toEqual({ text: 'осталось 7:43', overdue: false });
     expect(countdown('2026-10-08T10:00:00Z', now)).toEqual({ text: 'просрочено 2:17', overdue: true });
+  });
+});
+
+describe('ответы с цитатой', () => {
+  it('находит исходное сообщение и убирает старую цитату из текста', () => {
+    expect(replyTarget({ body: 'Да', 'm.relates_to': { 'm.in_reply_to': { event_id: '$q1' } } })).toBe('$q1');
+    expect(replyTarget({ body: 'Да' })).toBeNull();
+    expect(stripReplyFallback('> <@smirnova:konsilium.test> Ставим ИГХ?\n> блок 1А\n\nДа, ставим')).toBe('Да, ставим');
+    expect(stripReplyFallback('Без цитаты\n> не в начале')).toBe('Без цитаты\n> не в начале');
+  });
+
+  it('текст цитаты: первая строка, вложения и находки — подписью', () => {
+    expect(quoteText(item('$1', 'm.room.message', { msgtype: 'm.text', body: 'Первая строка\nвторая' }))).toBe('Первая строка');
+    expect(quoteText(item('$2', 'm.room.message', { msgtype: 'm.image', body: 'препарат.png' }))).toBe('Изображение: препарат.png');
+    expect(quoteText(item('$3', 'm.room.message', { msgtype: 'm.file', body: 'заключение.pdf' }))).toBe('Файл: заключение.pdf');
+    expect(quoteText(undefined)).toBe('Сообщение недоступно');
+  });
+});
+
+describe('вложения', () => {
+  it('размер файла по-русски', () => {
+    expect(formatSize(12)).toBe('12 Б');
+    expect(formatSize(340 * 1024)).toBe('340 КБ');
+    expect(formatSize(1.25 * 1024 * 1024)).toBe('1,3 МБ');
+    expect(formatSize(48 * 1024 * 1024)).toBe('48 МБ');
+  });
+
+  it('исполняемые, пустые и слишком большие файлы не отправляются', () => {
+    const limit = 50 * 1024 * 1024;
+    expect(attachmentProblem({ name: 'заключение.pdf', size: 1000 }, limit)).toBeNull();
+    expect(attachmentProblem({ name: 'viewer.EXE', size: 1000 }, limit)).toMatch(/исполняемые/);
+    expect(attachmentProblem({ name: 'macro.ps1', size: 1000 }, limit)).toMatch(/исполняемые/);
+    expect(attachmentProblem({ name: 'пусто.txt', size: 0 }, limit)).toMatch(/пустой/);
+    expect(attachmentProblem({ name: 'серия.dcm', size: limit + 1 }, limit)).toMatch(/больше 50 МБ/);
+  });
+});
+
+describe('поиск по сообщениям', () => {
+  it('подсвечивает слова по началу, без учёта регистра, в том числе кириллицу', () => {
+    expect(highlightParts('Метастазы в лимфоузле; метастаз подтверждён', ['метастаз'])).toEqual([
+      { text: 'Метастазы', hit: true },
+      { text: ' в лимфоузле; ', hit: false },
+      { text: 'метастаз', hit: true },
+      { text: ' подтверждён', hit: false },
+    ]);
+    // Только с начала слова: «стаз» внутри «метастаз» не подсвечивается.
+    expect(highlightParts('метастаз', ['стаз'])).toEqual([{ text: 'метастаз', hit: false }]);
+    expect(highlightParts('HER2 (3+), her2-позитивный', ['her2'])).toEqual([
+      { text: 'HER2', hit: true },
+      { text: ' (3+), ', hit: false },
+      { text: 'her2', hit: true },
+      { text: '-позитивный', hit: false },
+    ]);
+  });
+
+  it('фрагмент длинного сообщения — вокруг совпадения', () => {
+    const long = `${'Описание макропрепарата. '.repeat(10)}Найден очаг 12 мм в верхней доле. ${'Прочее. '.repeat(10)}`;
+    const s = snippet(long, ['очаг'], 60);
+    expect(s.startsWith('…')).toBe(true);
+    expect(s).toContain('очаг 12 мм');
+    expect(s.length).toBeLessThanOrEqual(60);
+    expect(snippet('Коротко', ['коротко'])).toBe('Коротко');
   });
 });

@@ -58,6 +58,8 @@ export default defineConfig({
     permissions: ['microphone', 'camera'],
     launchOptions: {
       args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
+      // Без UTF-8 в локали Chromium заменяет кириллическое имя скачиваемого файла на «download».
+      env: { ...(process.env as Record<string, string>), LANG: process.env.LANG || 'C.UTF-8' },
       ...(existsSync(chromium) ? { executablePath: chromium } : {}),
     },
   },

@@ -176,8 +176,9 @@ export function preview(e: TimelineItem | undefined, senderName: string, isMine:
   if (e.type === 'm.room.message' && e.content.msgtype === MsgType.Critical) return `Критическая находка: ${String((e.content[MsgType.Critical] as { finding?: string } | undefined)?.finding ?? '')}`;
   if (e.type === EventType.ReportStatus) return e.content.status === 'accepted' ? 'Черновик протокола принят' : 'Черновик протокола отклонён';
   if (e.type !== 'm.room.message') return '';
-  const body = String(e.content.body ?? '').split('\n')[0] ?? '';
-  if (e.content.msgtype === 'm.notice') return body;
+  const first = String(e.content.body ?? '').split('\n')[0] ?? '';
+  if (e.content.msgtype === 'm.notice') return first;
+  const body = e.content.msgtype === 'm.image' ? `Изображение: ${first}` : e.content.msgtype === 'm.file' ? `Файл: ${first}` : stripReplyFallback(String(e.content.body ?? '')).split('\n')[0];
   return `${isMine ? 'Вы' : senderName.split(' ')[0]}: ${body}`;
 }
 
@@ -348,4 +349,89 @@ export function delayLabel(seconds: number): string {
   if (s < 3600) return s % 60 ? `${Math.floor(s / 60)} мин ${s % 60} с` : `${s / 60} мин`;
   const m = Math.round((s % 3600) / 60);
   return m ? `${Math.floor(s / 3600)} ч ${m} мин` : `${Math.floor(s / 3600)} ч`;
+}
+
+// ── Ответы, вложения, поиск ─────────────────────────────────────────────────
+
+/** ID сообщения, на которое отвечают (`m.relates_to.m.in_reply_to`). */
+export function replyTarget(content: Record<string, unknown>): string | null {
+  const rel = content['m.relates_to'] as { 'm.in_reply_to'?: { event_id?: unknown } } | undefined;
+  const id = rel?.['m.in_reply_to']?.event_id;
+  return typeof id === 'string' && id ? id : null;
+}
+
+/** Старые клиенты дописывают цитату в начало текста («> <@user> …» и пустая строка) — её не показываем. */
+export function stripReplyFallback(body: string): string {
+  const lines = body.split('\n');
+  let i = 0;
+  while (i < lines.length && lines[i]!.startsWith('> ')) i++;
+  if (i === 0) return body;
+  if (lines[i] === '') i++;
+  return lines.slice(i).join('\n');
+}
+
+/** Текст цитаты: первая строка сообщения; вложения и структурные сообщения — понятной подписью. */
+export function quoteText(e: TimelineItem | undefined): string {
+  if (!e) return 'Сообщение недоступно';
+  if (e.type !== 'm.room.message') return preview(e, '', false) || 'Событие';
+  const body = stripReplyFallback(String(e.content.body ?? '')).split('\n')[0] ?? '';
+  switch (e.content.msgtype) {
+    case 'm.image':
+      return `Изображение: ${body}`;
+    case 'm.file':
+      return `Файл: ${body}`;
+    case MsgType.Critical:
+      return preview(e, '', false);
+    default:
+      return body;
+  }
+}
+
+/** «12 Б», «340 КБ», «1,2 МБ». */
+export function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} Б`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)} КБ`;
+  const mb = kb / 1024;
+  return `${mb < 10 ? mb.toFixed(1).replace('.', ',') : Math.round(mb)} МБ`;
+}
+
+/** Исполняемые файлы и скрипты в клинический чат не отправляются. */
+const BLOCKED_EXT = /\.(exe|msi|bat|cmd|com|scr|pif|ps1|vbs|vbe|js|jse|wsf|jar|sh|dll|lnk|hta|reg)$/i;
+
+/** Почему файл нельзя отправить; `null` — можно. */
+export function attachmentProblem(file: { name: string; size: number }, maxBytes: number): string | null {
+  if (BLOCKED_EXT.test(file.name)) return `«${file.name}»: исполняемые файлы и скрипты отправлять нельзя`;
+  if (file.size === 0) return `«${file.name}»: пустой файл`;
+  if (file.size > maxBytes) return `«${file.name}»: больше ${formatSize(maxBytes)}`;
+  return null;
+}
+
+/** Части текста с подсветкой найденных слов (поиск по сообщениям). Совпадение — по началу слова, без учёта регистра. */
+export function highlightParts(text: string, terms: string[]): Array<{ text: string; hit: boolean }> {
+  const words = [...new Set(terms.map((t) => t.trim()).filter((t) => t.length > 0))].sort((a, b) => b.length - a.length);
+  if (!words.length) return [{ text, hit: false }];
+  const escaped = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const re = new RegExp(`(?<![\\p{L}\\p{N}])(${escaped.join('|')})[\\p{L}\\p{N}]*`, 'giu');
+  const out: Array<{ text: string; hit: boolean }> = [];
+  let last = 0;
+  for (const m of text.matchAll(re)) {
+    if (m.index! > last) out.push({ text: text.slice(last, m.index), hit: false });
+    out.push({ text: m[0], hit: true });
+    last = m.index! + m[0].length;
+  }
+  if (last < text.length) out.push({ text: text.slice(last), hit: false });
+  return out;
+}
+
+/** Фрагмент длинного сообщения вокруг первого совпадения — для строки результата поиска. */
+export function snippet(text: string, terms: string[], width = 120): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  if (flat.length <= width) return flat;
+  const lower = flat.toLowerCase();
+  const at = Math.min(...terms.map((t) => lower.indexOf(t.toLowerCase())).filter((i) => i >= 0), Number.MAX_SAFE_INTEGER);
+  if (at === Number.MAX_SAFE_INTEGER || at < width / 2) return `${flat.slice(0, width - 1)}…`;
+  const start = Math.max(0, at - Math.floor(width / 3));
+  const end = Math.min(flat.length, start + width - 2);
+  return `…${flat.slice(start, end)}${end < flat.length ? '…' : ''}`;
 }

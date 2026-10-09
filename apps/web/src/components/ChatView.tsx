@@ -3,6 +3,11 @@ import { Direction, EventStatus, type MatrixClient, type MatrixEvent, type Room 
 import { EventType, MsgType, RoomType, parseStructured, type CaseContext, type CaseRolesContent, type KeyImage, type TranscriptSegment } from '@konsilium/protocol';
 import type { LinkOpen } from '@konsilium/embed/protocol';
 import {
+  attachmentProblem,
+  formatSize,
+  quoteText,
+  replyTarget,
+  stripReplyFallback,
   ageLabel,
   formatDay,
   formatDue,
@@ -29,7 +34,7 @@ import {
 import { activeCall, formatDuration } from '../call.ts';
 import { config } from '../config.ts';
 import { closeArchived, roomArchived, roomCriticals, toItem } from '../matrix.ts';
-import { useAuthedMedia } from '../media.ts';
+import { downloadMedia, maxUploadBytes, sendAttachment, useAuthedMedia } from '../media.ts';
 import { ProtocolDraftCard, TranscriptCard } from './AiCards.tsx';
 import { CriticalBar, CriticalCard, CriticalForm } from './Critical.tsx';
 import { RoomAvatar } from './ChatList.tsx';
@@ -292,16 +297,59 @@ function ArchivedBar({ client, room, onClosed, canClose }: { client: MatrixClien
   );
 }
 
-function Composer({ client, room, requests, criticalRoles }: { client: MatrixClient; room: Room; requests: boolean; criticalRoles: Map<string, string[]> | null }) {
+/** Загрузка вложения в ленте над полем ввода. */
+export interface Upload {
+  id: number;
+  name: string;
+  pct: number;
+  error?: string;
+}
+
+function Composer({
+  client,
+  room,
+  requests,
+  criticalRoles,
+  reply,
+  onCancelReply,
+  onFiles,
+  uploads,
+  onDismissUpload,
+}: {
+  client: MatrixClient;
+  room: Room;
+  requests: boolean;
+  criticalRoles: Map<string, string[]> | null;
+  /** Ответ на сообщение: автор и текст цитаты. */
+  reply: { eventId: string; sender: string; name: string; text: string } | null;
+  onCancelReply: () => void;
+  onFiles: (files: File[]) => void;
+  uploads: Upload[];
+  onDismissUpload: (id: number) => void;
+}) {
   const [text, setText] = useState('');
   const [form, setForm] = useState<'request' | 'critical' | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
   const invited = room.getMyMembership() === 'invite';
+  useEffect(() => {
+    if (reply) input.current?.focus();
+  }, [reply]);
 
   async function send() {
     const body = text.trim();
     if (!body) return;
     setText('');
-    await client.sendTextMessage(room.roomId, body).catch(() => setText(body));
+    const target = reply;
+    onCancelReply();
+    // Ответ: ссылка на исходное сообщение и упоминание его автора (уведомление), без цитаты в тексте (Matrix 1.13).
+    const content = {
+      msgtype: 'm.text',
+      body,
+      ...(target ? { 'm.relates_to': { 'm.in_reply_to': { event_id: target.eventId } } } : {}),
+      ...(target && target.sender !== client.getUserId() ? { 'm.mentions': { user_ids: [target.sender] } } : {}),
+    };
+    await client.sendMessage(room.roomId, content as never).catch(() => setText(body));
   }
 
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -309,6 +357,7 @@ function Composer({ client, room, requests, criticalRoles }: { client: MatrixCli
       e.preventDefault();
       void send();
     }
+    if (e.key === 'Escape' && reply) onCancelReply();
   }
 
   if (invited) {
@@ -338,12 +387,157 @@ function Composer({ client, room, requests, criticalRoles }: { client: MatrixCli
           )}
         </div>
       )}
-    <div className="composer">
-      <textarea id="composer-input" rows={1} placeholder="Сообщение" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} aria-label="Сообщение" />
-      <button className="send" onClick={() => void send()} disabled={!text.trim()} aria-label="Отправить">
-        <Icon name="send" />
-      </button>
+      {uploads.length > 0 && (
+        <ul className="uploads" aria-label="Загрузка файлов">
+          {uploads.map((u) => (
+            <li key={u.id} className={u.error ? 'error' : ''}>
+              <Icon name="attach" size={16} />
+              <span className="upload-name">{u.name}</span>
+              {u.error ? <span role="alert">{u.error}</span> : <span className="meta">{u.pct}%</span>}
+              {u.error && (
+                <button className="link" onClick={() => onDismissUpload(u.id)} aria-label="Скрыть">
+                  ×
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {reply && (
+        <div className="reply-bar" aria-label="Ответ на сообщение">
+          <div className="quote">
+            <b>
+              <Icon name="reply" size={14} />
+              {reply.name}
+            </b>
+            <span>{reply.text}</span>
+          </div>
+          <button className="link" onClick={onCancelReply} aria-label="Отменить ответ">
+            ×
+          </button>
+        </div>
+      )}
+      <div className="composer">
+        <button className="icon-btn" onClick={() => fileInput.current?.click()} aria-label="Прикрепить файл" title="Прикрепить файл">
+          <Icon name="attach" />
+        </button>
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          hidden
+          aria-label="Файлы для отправки"
+          onChange={(e) => {
+            onFiles([...(e.target.files ?? [])]);
+            e.target.value = '';
+          }}
+        />
+        <textarea
+          ref={input}
+          id="composer-input"
+          rows={1}
+          placeholder={reply ? 'Ответ' : 'Сообщение'}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKey}
+          onPaste={(e) => {
+            // Снимок экрана из буфера обмена — вложением.
+            const files = [...e.clipboardData.files];
+            if (files.length) {
+              e.preventDefault();
+              onFiles(files);
+            }
+          }}
+          aria-label="Сообщение"
+        />
+        <button className="send" onClick={() => void send()} disabled={!text.trim()} aria-label="Отправить">
+          <Icon name="send" />
+        </button>
+      </div>
     </div>
+  );
+}
+
+/** Цитата в пузыре ответа: автор и начало исходного сообщения; нажатие — к исходному сообщению. */
+function Quote({ name, text, onJump }: { name: string; text: string; onJump: () => void }) {
+  return (
+    <button className="quote" onClick={onJump} title="К исходному сообщению">
+      <b>
+        <Icon name="reply" size={14} />
+        {name}
+      </b>
+      <span>{text}</span>
+    </button>
+  );
+}
+
+interface MediaContent {
+  body?: string;
+  filename?: string;
+  url?: string;
+  info?: { mimetype?: string; size?: number; w?: number; h?: number };
+}
+
+/** Изображение: миниатюра от сервера; нажатие — исходный файл во весь экран. */
+function ImageAttachment({ client, content }: { client: MatrixClient; content: MediaContent }) {
+  const [open, setOpen] = useState(false);
+  const thumb = useAuthedMedia(client, content.url, { w: 640, h: 480 });
+  const name = content.filename ?? content.body ?? 'изображение';
+  const ratio = content.info?.w && content.info?.h ? `${content.info.w} / ${content.info.h}` : '4 / 3';
+  return (
+    <>
+      <button className="image-attachment" style={{ aspectRatio: ratio }} onClick={() => setOpen(true)} aria-label={`Изображение ${name}`}>
+        {thumb ? <img src={thumb} alt={name} /> : <span className="meta">Загрузка…</span>}
+      </button>
+      {open && <Lightbox client={client} content={content} name={name} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+function Lightbox({ client, content, name, onClose }: { client: MatrixClient; content: MediaContent; name: string; onClose: () => void }) {
+  const full = useAuthedMedia(client, content.url, null);
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="lightbox" role="dialog" aria-label={name} onClick={onClose}>
+      {full ? <img src={full} alt={name} /> : <span>Загрузка…</span>}
+      <div className="lightbox-bar" onClick={(e) => e.stopPropagation()}>
+        <span>{name}</span>
+        {content.url && (
+          <button className="ghost" onClick={() => void downloadMedia(client, content.url!, name)}>
+            Скачать
+          </button>
+        )}
+        <button className="ghost" onClick={onClose}>
+          Закрыть
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Файл: имя, размер, «Скачать». */
+function FileAttachment({ client, content }: { client: MatrixClient; content: MediaContent }) {
+  const [error, setError] = useState<string | null>(null);
+  const name = content.filename ?? content.body ?? 'файл';
+  return (
+    <div className="file-attachment" aria-label={`Файл ${name}`}>
+      <Icon name="file" />
+      <div>
+        <div className="file-name">{name}</div>
+        <div className="meta">
+          {content.info?.size !== undefined ? formatSize(content.info.size) : ''}
+          {error && <span className="reveal-error"> {error}</span>}
+        </div>
+      </div>
+      {content.url && (
+        <button className="ghost" onClick={() => downloadMedia(client, content.url!, name).catch((e: Error) => setError(e.message))}>
+          Скачать
+        </button>
+      )}
     </div>
   );
 }
@@ -357,10 +551,13 @@ export function ChatView({
   onCall,
   embedded = false,
   onOpenLink = openInNewTab,
+  focusEventId = null,
 }: {
   client: MatrixClient;
   room: Room;
   onBack: () => void;
+  /** Показать это сообщение (результат поиска): прокрутить к нему и подсветить. */
+  focusEventId?: string | null;
   /** Архивный чат убран из списка. */
   onClosed?: () => void;
   /** Встроен в РИС/ЛИС: без кнопки «назад», ссылки отдаются хосту. */
@@ -412,6 +609,72 @@ export function ChatView({
   const joined = room.getMyMembership() === 'join';
   const writable = joined && !archived;
   const call = activeCall(room);
+
+  // Ответы: исходные сообщения, которых нет в загруженной ленте, запрашиваются у сервера.
+  const byId = new Map(items.map((e) => [e.eventId, e]));
+  const [fetched, setFetched] = useState<Map<string, TimelineItem | null>>(new Map());
+  const missing = [...new Set(items.map((e) => replyTarget(e.content)).filter((id): id is string => !!id && !byId.has(id) && !fetched.has(id)))];
+  useEffect(() => {
+    for (const id of missing) {
+      setFetched((m) => new Map(m).set(id, null));
+      client
+        .fetchRoomEvent(room.roomId, id)
+        .then((raw) =>
+          setFetched((m) =>
+            new Map(m).set(id, { eventId: id, type: raw.type ?? '', sender: raw.sender ?? '', ts: raw.origin_server_ts ?? 0, content: (raw.content ?? {}) as Record<string, unknown> }),
+          ),
+        )
+        .catch(() => undefined);
+    }
+  }, [missing.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+  const original = (id: string) => byId.get(id) ?? fetched.get(id) ?? undefined;
+
+  const [replyTo, setReplyTo] = useState<string | null>(null);
+  const replyItem = replyTo ? original(replyTo) : undefined;
+  const reply = replyTo && replyItem ? { eventId: replyTo, sender: replyItem.sender, name: name(replyItem.sender), text: quoteText(replyItem) } : null;
+
+  // Вложения: проверка, загрузка с прогрессом, отправка. Ошибки остаются в списке, пока их не скроют.
+  const [uploads, setUploads] = useState<Upload[]>([]);
+  const uploadSeq = useRef(0);
+  async function attach(files: File[]) {
+    const limit = await maxUploadBytes(client);
+    const target = replyTo;
+    if (files.length) setReplyTo(null);
+    for (const file of files) {
+      const id = ++uploadSeq.current;
+      const problem = attachmentProblem(file, limit);
+      setUploads((u) => [...u, { id, name: file.name, pct: 0, ...(problem ? { error: problem } : {}) }]);
+      if (problem) continue;
+      try {
+        await sendAttachment(client, room.roomId, file, {
+          replyTo: target,
+          onProgress: (pct) => setUploads((u) => u.map((x) => (x.id === id ? { ...x, pct } : x))),
+        });
+        setUploads((u) => u.filter((x) => x.id !== id));
+      } catch (e) {
+        setUploads((u) => u.map((x) => (x.id === id ? { ...x, error: `«${file.name}» не отправлен: ${(e as Error).message}` } : x)));
+      }
+    }
+  }
+
+  // Переход к сообщению (цитата, результат поиска): если его нет в ленте — догружаем историю.
+  const [highlight, setHighlight] = useState<string | null>(null);
+  async function jumpTo(eventId: string) {
+    stick.current = false;
+    for (let i = 0; i < 10 && !document.getElementById(`ev-${eventId}`); i++) {
+      if (room.getLiveTimeline().getPaginationToken(Direction.Backward) === null) break;
+      await client.scrollback(room, 50).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const el = document.getElementById(`ev-${eventId}`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'center' });
+    setHighlight(eventId);
+    setTimeout(() => setHighlight((h) => (h === eventId ? null : h)), 2500);
+  }
+  useEffect(() => {
+    if (focusEventId) void jumpTo(focusEventId);
+  }, [focusEventId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Прокрутка: держимся низа, если пользователь не листает историю.
   const scroller = useRef<HTMLDivElement>(null);
@@ -506,8 +769,11 @@ export function ChatView({
     const keyImage = structured?.msgtype === MsgType.KeyImage ? structured : null;
     const transcript = structured?.msgtype === MsgType.Transcript ? structured : null;
     const draft = structured?.msgtype === MsgType.Report && structured[MsgType.Report].kind === 'consilium_protocol' ? structured : null;
+    const replyId = replyTarget(e.content);
+    const quoted = replyId ? original(replyId) : undefined;
+    const media = e.content.msgtype === 'm.image' || e.content.msgtype === 'm.file' ? (e.content as MediaContent) : null;
     rows.push(
-      <div key={e.eventId} className={`msg ${mine ? 'out' : 'in'}${first ? ' first' : ''}`}>
+      <div key={e.eventId} id={`ev-${e.eventId}`} className={`msg ${mine ? 'out' : 'in'}${first ? ' first' : ''}${highlight === e.eventId ? ' highlight' : ''}`}>
         <div className={`bubble${transcript || draft || criticalMsg ? ' wide' : ''}`}>
           {!mine && first && (
             <div className="sender">
@@ -515,6 +781,7 @@ export function ChatView({
               {role && <span className="role"> · {roleLabel(role)}</span>}
             </div>
           )}
+          {replyId && <Quote name={quoted ? name(quoted.sender) : 'Сообщение'} text={quoteText(quoted)} onJump={() => void jumpTo(replyId)} />}
           {request ? (
             <RequestCard view={request} />
           ) : keyImage ? (
@@ -534,8 +801,12 @@ export function ChatView({
               canDecide={writable}
               name={name}
             />
+          ) : media && e.content.msgtype === 'm.image' ? (
+            <ImageAttachment client={client} content={media} />
+          ) : media ? (
+            <FileAttachment client={client} content={media} />
           ) : (
-            <div className="text">{String(e.content.body ?? '')}</div>
+            <div className="text">{replyId ? stripReplyFallback(String(e.content.body ?? '')) : String(e.content.body ?? '')}</div>
           )}
           <span className="meta">{pending ? 'отправка…' : formatTime(e.ts)}</span>
           {(reactions.get(e.eventId)?.length ?? 0) > 0 && (
@@ -555,7 +826,14 @@ export function ChatView({
             </div>
           )}
         </div>
-        {!pending && writable && <ReactionPicker onPick={(key) => react(e.eventId, key)} />}
+        {!pending && writable && (
+          <div className="msg-actions">
+            <button className="reaction-toggle" aria-label="Ответить" title="Ответить" onClick={() => setReplyTo(e.eventId)}>
+              <Icon name="reply" size={16} />
+            </button>
+            <ReactionPicker onPick={(key) => react(e.eventId, key)} />
+          </div>
+        )}
       </div>,
     );
   });
@@ -609,6 +887,15 @@ export function ChatView({
           const el = ev.currentTarget;
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
+        // Файлы можно перетащить в ленту.
+        onDragOver={(ev) => {
+          if (writable && ev.dataTransfer.types.includes('Files')) ev.preventDefault();
+        }}
+        onDrop={(ev) => {
+          if (!writable || !ev.dataTransfer.files.length) return;
+          ev.preventDefault();
+          void attach([...ev.dataTransfer.files]);
+        }}
       >
         {canLoadOlder && (
           <button className="ghost older" onClick={() => void loadOlder()} disabled={loadingOlder}>
@@ -621,7 +908,17 @@ export function ChatView({
         // Встроенный чат привязан к случаю РИС/ЛИС — убирать его из списка там незачем.
         <ArchivedBar client={client} room={room} onClosed={onClosed} canClose={!embedded} />
       ) : (
-        <Composer client={client} room={room} requests={ctx?.source === 'LIS'} criticalRoles={criticalRoles} />
+        <Composer
+          client={client}
+          room={room}
+          requests={ctx?.source === 'LIS'}
+          criticalRoles={criticalRoles}
+          reply={reply}
+          onCancelReply={() => setReplyTo(null)}
+          onFiles={(files) => void attach(files)}
+          uploads={uploads}
+          onDismissUpload={(id) => setUploads((u) => u.filter((x) => x.id !== id))}
+        />
       )}
     </>
   );

@@ -10,13 +10,16 @@ import { criticalWaitingFor, parseCaseContext } from './model.ts';
  * Медиа Synapse требует авторизацию (authenticated media), поэтому <img src> не подходит:
  * скачиваем с токеном и показываем через blob: URL.
  */
-export function useAuthedMedia(client: MatrixClient, mxc: string | undefined, size = { w: 640, h: 480 }): string | null {
+export function useAuthedMedia(client: MatrixClient, mxc: string | undefined, size: { w: number; h: number } | null = { w: 640, h: 480 }): string | null {
   const [url, setUrl] = useState<string | null>(null);
+  const w = size?.w;
+  const h = size?.h;
   useEffect(() => {
     if (!mxc) return;
     let objectUrl: string | null = null;
     let cancelled = false;
-    const http = client.mxcUrlToHttp(mxc, size.w, size.h, 'scale', false, true, true);
+    // С размером — миниатюра, которую считает сервер; без размера — исходный файл.
+    const http = w && h ? client.mxcUrlToHttp(mxc, w, h, 'scale', false, true, true) : client.mxcUrlToHttp(mxc, undefined, undefined, undefined, false, true, true);
     if (!http) return;
     fetch(http, { headers: { authorization: `Bearer ${client.getAccessToken()}` } })
       .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(String(r.status)))))
@@ -30,8 +33,80 @@ export function useAuthedMedia(client: MatrixClient, mxc: string | undefined, si
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [client, mxc, size.w, size.h]);
+  }, [client, mxc, w, h]);
   return url;
+}
+
+const DEFAULT_UPLOAD_LIMIT = 50 * 1024 * 1024;
+const uploadLimits = new WeakMap<MatrixClient, Promise<number>>();
+
+/** Предел размера загрузки на сервере (`m.upload.size`); если сервер не сообщает — 50 МБ, как у Synapse по умолчанию. */
+export function maxUploadBytes(client: MatrixClient): Promise<number> {
+  let p = uploadLimits.get(client);
+  if (!p) {
+    p = client
+      .getMediaConfig()
+      .then((c) => c['m.upload.size'] ?? DEFAULT_UPLOAD_LIMIT)
+      .catch(() => DEFAULT_UPLOAD_LIMIT);
+    uploadLimits.set(client, p);
+  }
+  return p;
+}
+
+const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp)$/;
+
+/**
+ * Отправить файл в чат: изображение — `m.image` с размерами (миниатюры сервер считает сам), остальное — `m.file`.
+ * Файл остаётся на сервере сообщений организации; доступ — только участникам комнаты (authenticated media).
+ */
+export async function sendAttachment(
+  client: MatrixClient,
+  roomId: string,
+  file: File,
+  opts: { replyTo?: string | null; onProgress?: (pct: number) => void } = {},
+): Promise<void> {
+  const type = file.type || 'application/octet-stream';
+  const { content_uri } = await client.uploadContent(file, {
+    name: file.name,
+    type,
+    progressHandler: ({ loaded, total }) => opts.onProgress?.(total ? Math.round((loaded / total) * 100) : 0),
+  });
+  const image = IMAGE_TYPES.test(type);
+  const info: Record<string, unknown> = { mimetype: type, size: file.size };
+  if (image) {
+    try {
+      const bmp = await createImageBitmap(file);
+      info.w = bmp.width;
+      info.h = bmp.height;
+      bmp.close();
+    } catch {
+      /* размеры не обязательны */
+    }
+  }
+  await client.sendMessage(roomId, {
+    msgtype: image ? 'm.image' : 'm.file',
+    body: file.name,
+    filename: file.name,
+    url: content_uri,
+    info,
+    ...(opts.replyTo ? { 'm.relates_to': { 'm.in_reply_to': { event_id: opts.replyTo } } } : {}),
+  } as never);
+}
+
+/** Скачать вложение (с токеном: authenticated media) и сохранить под исходным именем. */
+export async function downloadMedia(client: MatrixClient, mxc: string, filename: string): Promise<void> {
+  const http = client.mxcUrlToHttp(mxc, undefined, undefined, undefined, false, true, true);
+  if (!http) throw new Error('Неверная ссылка на файл');
+  const res = await fetch(http, { headers: { authorization: `Bearer ${client.getAccessToken()}` } });
+  if (!res.ok) throw new Error(`Сервер ответил ${res.status}`);
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
 const MAX_THUMBNAIL = 2 * 1024 * 1024;

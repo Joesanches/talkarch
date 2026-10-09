@@ -243,6 +243,31 @@ export async function sessionFromToken(accessToken: string): Promise<Session> {
   return { baseUrl: config.hsUrl, userId: r.user_id, accessToken, deviceId: r.device_id ?? '' };
 }
 
+export interface MessageHit {
+  roomId: string;
+  eventId: string;
+  sender: string;
+  ts: number;
+  body: string;
+}
+
+/**
+ * Поиск по сообщениям во всех чатах пользователя — на сервере (полнотекстовый индекс PostgreSQL в Synapse).
+ * Чаты случаев не шифруются сквозным шифрованием как раз ради поиска и аудита (docs/07-security-compliance.md).
+ */
+export async function searchMessages(client: MatrixClient, term: string): Promise<{ hits: MessageHit[]; count: number; highlights: string[] }> {
+  const r = await client.search({
+    body: { search_categories: { room_events: { search_term: term, order_by: 'recent' as never, filter: { limit: 20 } } } },
+  });
+  const ev = r.search_categories.room_events;
+  const hits = (ev?.results ?? []).flatMap(({ result }) => {
+    const body = result.content?.body;
+    if (!result.room_id || !result.event_id || typeof body !== 'string') return [];
+    return [{ roomId: result.room_id, eventId: result.event_id, sender: result.sender ?? '', ts: result.origin_server_ts ?? 0, body }];
+  });
+  return { hits, count: ev?.count ?? hits.length, highlights: ev?.highlights ?? [] };
+}
+
 /** Статусы критических находок комнаты: state-события сервиса контекста. */
 export function roomCriticals(room: Room) {
   const events = (room.currentState.getStateEvents(EventType.CriticalStatus) as MatrixEvent[] | null) ?? [];

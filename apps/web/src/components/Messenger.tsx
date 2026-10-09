@@ -36,6 +36,8 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
   const ready = sync === SyncState.Prepared || sync === SyncState.Syncing || sync === SyncState.Catchup;
   const [folder, setFolder] = useState<Folder>('all');
   const [selected, setSelected] = useState<string | null>(null);
+  // Найденное поиском сообщение: чат открывается и прокручивается к нему.
+  const [focus, setFocus] = useState<{ roomId: string; eventId: string } | null>(null);
   // Звонок живёт на уровне оболочки: можно переключаться между чатами, не разрывая связь.
   const [call, setCall] = useState<{ roomId: string; video: boolean } | null>(null);
   const [callMinimized, setCallMinimized] = useState(false);
@@ -149,6 +151,10 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
           onSelect={select}
           loading={!ready}
           emptyHint={folder === 'cases' ? 'Чаты случаев появятся, когда вы откроете случай в РИС или ЛИС' : 'Здесь пока пусто'}
+          onOpenEvent={(roomId, eventId) => {
+            setSelected(roomId);
+            setFocus({ roomId, eventId });
+          }}
         />
       )}
       <section className="chat">
@@ -180,6 +186,7 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
             room={current}
             onBack={() => setSelected(null)}
             onClosed={() => setSelected(null)}
+            focusEventId={focus?.roomId === current.roomId ? focus.eventId : null}
             inCall={call?.roomId === current.roomId}
             onCall={(video) => {
               setCall({ roomId: current.roomId, video });
