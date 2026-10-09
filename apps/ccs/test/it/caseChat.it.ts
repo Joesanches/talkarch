@@ -1,14 +1,15 @@
 /**
- * Интеграционный тест «чата случая» на настоящем Synapse: сервис контекста + песочница РИС/ЛИС по HTTP.
+ * Интеграционный тест «чата случая» на настоящем сервере Matrix (Synapse; Tuwunel — tools/load/tuwunel):
+ * сервис контекста + песочница РИС/ЛИС по HTTP.
  * Перед запуском: cd infra && docker compose up -d   (см. infra/README.md)
  * Запуск: pnpm test:it
  */
-import { createHmac } from 'node:crypto';
 import { resolve } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createHostMock, type HostMock } from '@konsilium/host-mock';
+import { registerUser } from '@konsilium/host-mock/users';
 import { EventType, MsgType, NotificationField, RoomType } from '@konsilium/protocol';
 import { loadConfig } from '../../src/config.ts';
 import { createService } from '../../src/index.ts';
@@ -35,17 +36,9 @@ async function cs<T = any>(token: string | null, method: string, path: string, b
   return { status: res.status, json: (await res.json().catch(() => ({}))) as T };
 }
 
-/** Пользователь через admin API с общим секретом; если уже есть — вход по паролю. */
+/** Пользователь (admin API Synapse или токен регистрации Tuwunel — registerUser); если уже есть — вход по паролю. */
 async function ensureUser(localpart: string): Promise<string> {
-  const nonceRes = await fetch(`${HS}/_synapse/admin/v1/register`);
-  const { nonce } = (await nonceRes.json()) as { nonce: string };
-  const mac = createHmac('sha1', SHARED_SECRET).update(`${nonce}\0${localpart}\0${PASSWORD}\0notadmin`).digest('hex');
-  const reg = await fetch(`${HS}/_synapse/admin/v1/register`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ nonce, username: localpart, password: PASSWORD, admin: false, mac }),
-  });
-  const regJson = (await reg.json()) as { access_token?: string; errcode?: string };
+  const regJson = await registerUser(HS, SHARED_SECRET, localpart, PASSWORD);
   if (regJson.access_token) return regJson.access_token;
   if (regJson.errcode !== 'M_USER_IN_USE') throw new Error(`Регистрация ${localpart}: ${JSON.stringify(regJson)}`);
   const login = await cs<{ access_token: string }>(null, 'POST', '/login', {
@@ -80,7 +73,7 @@ const timeline = async (token: string, roomId: string) =>
 const membership = async (token: string, roomId: string, userId: string) =>
   (await cs(token, 'GET', `/rooms/${enc(roomId)}/state/m.room.member/${enc(userId)}`)).json.membership as string | undefined;
 
-describe('Чат случая на Synapse с песочницей РИС/ЛИС', () => {
+describe('Чат случая на сервере Matrix с песочницей РИС/ЛИС', () => {
   let app: FastifyInstance;
   let svc: ReturnType<typeof createService>;
   let mock: HostMock;
@@ -91,7 +84,7 @@ describe('Чат случая на Synapse с песочницей РИС/ЛИС
 
   beforeAll(async () => {
     const versions = await fetch(`${HS}/_matrix/client/versions`).catch(() => null);
-    if (!versions?.ok) throw new Error(`Synapse недоступен на ${HS}. Запустите: cd infra && docker compose up -d`);
+    if (!versions?.ok) throw new Error(`Сервер Matrix недоступен на ${HS}. Запустите: cd infra && docker compose up -d`);
 
     for (const u of ['smirnova', 'ershova', 'kolesnikov', 'gusev', 'outsider', 'orlov', 'belova', 'petrov', 'melnikova']) tok[u] = await ensureUser(u);
 

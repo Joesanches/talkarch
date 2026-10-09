@@ -1,6 +1,7 @@
 /**
- * Пользователи стенда: регистрация через admin API Synapse (общий секрет из infra/synapse/homeserver.yaml)
- * и имена, которые в продукте пришли бы из каталога (Keycloak/AD). Все данные вымышлены.
+ * Пользователи стенда: регистрация через admin API Synapse (общий секрет из infra/synapse/homeserver.yaml) или,
+ * на Tuwunel, по токену регистрации (tools/load/tuwunel), и имена, которые в продукте пришли бы из каталога
+ * (Keycloak/AD). Все данные вымышлены.
  * Запуск: pnpm dev:users
  */
 import { createHmac, randomBytes } from 'node:crypto';
@@ -33,6 +34,41 @@ async function call(url: string, init: RequestInit = {}, attempts = 5): Promise<
 
 const json = { 'content-type': 'application/json' };
 
+export interface Registration {
+  access_token?: string;
+  user_id?: string;
+  errcode?: string;
+  error?: string;
+}
+
+/**
+ * Регистрация пользователя с именем. У Synapse — admin API с общим секретом; у Tuwunel такого API нет —
+ * обычная регистрация с токеном (registration_token, тот же dev-only-секрет), имя задаётся после.
+ */
+export async function registerUser(hs: string, sharedSecret: string, user: string, password: string, displayname?: string): Promise<Registration> {
+  const nonceRes = await call(`${hs}/_synapse/admin/v1/register`);
+  if (nonceRes.ok) {
+    const { nonce } = (await nonceRes.json()) as { nonce: string };
+    const mac = createHmac('sha1', sharedSecret).update(`${nonce}\0${user}\0${password}\0notadmin`).digest('hex');
+    const reg = await call(`${hs}/_synapse/admin/v1/register`, {
+      method: 'POST',
+      headers: json,
+      body: JSON.stringify({ nonce, username: user, displayname, password, admin: false, mac }),
+    });
+    return (await reg.json()) as Registration;
+  }
+  const register = async (body: Record<string, unknown>) =>
+    (await (await call(`${hs}/_matrix/client/v3/register`, { method: 'POST', headers: json, body: JSON.stringify(body) })).json()) as Registration & { session?: string };
+  const body = { username: user, password };
+  let reg = await register(body);
+  if (reg.session) reg = await register({ ...body, auth: { type: 'm.login.registration_token', token: sharedSecret, session: reg.session } });
+  if (reg.access_token && displayname) {
+    const auth = { ...json, authorization: `Bearer ${reg.access_token}` };
+    await call(`${hs}/_matrix/client/v3/profile/${encodeURIComponent(reg.user_id!)}/displayname`, { method: 'PUT', headers: auth, body: JSON.stringify({ displayname }) });
+  }
+  return reg;
+}
+
 export async function ensureDevUsers(
   hs = 'http://localhost:8008',
   sharedSecret = 'dev-only-registration-shared-secret',
@@ -40,19 +76,12 @@ export async function ensureDevUsers(
   password = DEV_PASSWORD,
 ): Promise<void> {
   const versions = await fetch(`${hs}/_matrix/client/versions`).catch(() => null);
-  if (!versions?.ok) throw new Error(`Synapse недоступен на ${hs}. Запустите: cd infra && docker compose up -d`);
+  if (!versions?.ok) throw new Error(`Сервер Matrix недоступен на ${hs}. Запустите: cd infra && docker compose up -d`);
   for (const [user, displayname] of Object.entries(users)) {
-    const { nonce } = (await (await call(`${hs}/_synapse/admin/v1/register`)).json()) as { nonce: string };
-    const mac = createHmac('sha1', sharedSecret).update(`${nonce}\0${user}\0${password}\0notadmin`).digest('hex');
     // Имя задаётся сразу при регистрации — входить не нужно.
-    const reg = await call(`${hs}/_synapse/admin/v1/register`, {
-      method: 'POST',
-      headers: json,
-      body: JSON.stringify({ nonce, username: user, displayname, password, admin: false, mac }),
-    });
-    if (reg.ok) continue;
-    const regJson = (await reg.json()) as { errcode?: string };
-    if (regJson.errcode !== 'M_USER_IN_USE') throw new Error(`Регистрация ${user}: ${JSON.stringify(regJson)}`);
+    const reg = await registerUser(hs, sharedSecret, user, password, displayname);
+    if (reg.access_token) continue;
+    if (reg.errcode !== 'M_USER_IN_USE') throw new Error(`Регистрация ${user}: ${JSON.stringify(reg)}`);
 
     // Пользователь уже был (например, его создали тесты) — обновляем имя от его лица.
     const login = await call(

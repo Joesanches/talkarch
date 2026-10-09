@@ -40,6 +40,15 @@ SYNC_MODE=sliding pnpm --filter @konsilium/load load
 docker compose $F down -v
 ```
 
+Tuwunel (Apache-2.0) вместо Synapse (`infra/docker-compose.tuwunel.yml`, тот же порт 18008; пользователей тест регистрирует по токену — admin API Synapse у Tuwunel нет):
+
+```bash
+F="-p konsilium-load -f infra/docker-compose.yml -f infra/docker-compose.tuwunel.yml -f tools/load/docker-compose.load.yml -f tools/load/docker-compose.load-tuwunel.yml"
+docker compose $F up -d tuwunel
+SYNC_MODE=sliding pnpm --filter @konsilium/load load
+docker compose $F down -v
+```
+
 Параметры — переменные окружения (по умолчанию в скобках): `USERS` (300), `ROOMS_PER_USER` (20), `CREATE_RATE` (2.5), `BURST` (300), `BURST_RATE` (5), `HEAVY_USERS` (5), `HEAVY_ROOMS` (200), `INTEGRATION_EVENTS` (1000), `MSG_RATES` (`2,10,30`), `STEP_S` (60), `ARCHIVE_ROOMS` (100), `SYNC_MODE` (`classic` или `sliding`), `HS_URL` (`http://localhost:18008`).
 
 Генератор нагрузки, сервис контекста и Synapse работают на одной машине и делят процессор — цифры получаются пессимистичными. Для решения о сайзинге повторите прогон на целевом железе с конфигурацией Synapse с воркерами ([docs/11-load-test.md](../../docs/11-load-test.md), «Что дальше»).

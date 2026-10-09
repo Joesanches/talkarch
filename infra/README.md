@@ -134,6 +134,23 @@ docker compose up -d --remove-orphans                                       # о
 
 Конфигурация — `synapse/workers/`. Клиенты, сервис контекста и тесты работают с тем же адресом `http://localhost:8008`. Учтите задержку репликации: изменение, сделанное через главный процесс (например, «забыть» комнату), воркер синхронизации видит через доли секунды.
 
+## Tuwunel вместо Synapse
+
+Для сравнения серверов ([docs/11-load-test.md, раздел 7](../docs/11-load-test.md#7-tuwunel-против-synapse-прогон-7)) окружение поднимается на [Tuwunel](https://github.com/matrix-construct/tuwunel) (Rust, Apache-2.0) — тот же порт 8008, та же регистрация сервиса контекста и тот же Keycloak:
+
+```bash
+cd infra
+docker compose stop synapse
+docker compose -f docker-compose.yml -f docker-compose.tuwunel.yml up -d    # Tuwunel
+docker compose -f docker-compose.yml -f docker-compose.tuwunel.yml stop tuwunel && docker compose up -d   # обратно на Synapse
+```
+
+Конфигурация — `tuwunel/tuwunel.toml`. Отличия для разработчика:
+
+- admin API Synapse нет: `pnpm dev:users` и тесты регистрируют пользователей по токену регистрации (тот же dev-only-секрет);
+- база — встроенная RocksDB в томе `tuwunel-data`, PostgreSQL нужен только сервису контекста;
+- администрирование — командами в комнате администраторов (первый зарегистрированный пользователь становится администратором сервера).
+
 ## Остановка и сброс
 
 ```bash

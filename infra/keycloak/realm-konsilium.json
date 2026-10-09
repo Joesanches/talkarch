@@ -24,7 +24,8 @@
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
       "redirectUris": [
-        "http://localhost:8008/_synapse/client/oidc/callback"
+        "http://localhost:8008/_synapse/client/oidc/callback",
+        "http://localhost:8008/_matrix/client/unstable/login/sso/callback/synapse"
       ],
       "webOrigins": [],
       "attributes": {

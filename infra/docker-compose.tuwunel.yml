@@ -1,0 +1,24 @@
+# Окружение разработчика на Tuwunel (Apache-2.0) вместо Synapse — для сравнения (docs/11-load-test.md, раздел 7):
+#   docker compose -f docker-compose.yml -f docker-compose.tuwunel.yml up -d
+# Synapse не запускается; Tuwunel слушает тот же порт 8008, сервис контекста, песочница и веб-клиент — без изменений.
+# PostgreSQL остаётся для сервиса контекста; база Tuwunel — RocksDB в томе tuwunel-data.
+services:
+  synapse:
+    profiles: [synapse]
+  synapse-keys:
+    profiles: [synapse]
+  tuwunel:
+    image: jevolk/tuwunel:v1.9.3
+    environment:
+      TUWUNEL_CONFIG: /etc/tuwunel/tuwunel.toml
+    ports:
+      - "8008:8008"
+    volumes:
+      - ./tuwunel/tuwunel.toml:/etc/tuwunel/tuwunel.toml:ro
+      - ./synapse/appservice-ccs.yaml:/etc/tuwunel/appservices/ccs.yaml:ro
+      - tuwunel-data:/var/lib/tuwunel
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  tuwunel-data:

@@ -56,11 +56,11 @@ const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 
 
 // ── Ресурсы ──────────────────────────────────────────────────────────────────
 
-/** Процессор и память Synapse (главный процесс и воркеры, если есть) и PostgreSQL стенда. */
+/** Процессор и память сервера (Synapse с воркерами, если есть, или Tuwunel) и PostgreSQL стенда. */
 function dockerStats(): Record<string, string> {
   try {
     const project = SYNAPSE_CONTAINER.replace(/-synapse-1$/, '');
-    const names = execFileSync('docker', ['ps', '--format', '{{.Names}}', '--filter', `name=^${project}-(synapse|postgres|valkey)`], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
+    const names = execFileSync('docker', ['ps', '--format', '{{.Names}}', '--filter', `name=^${project}-(synapse|tuwunel|postgres|valkey)`], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
     const out = execFileSync('docker', ['stats', '--no-stream', '--format', '{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}', ...(names.length ? names : [SYNAPSE_CONTAINER, PG_CONTAINER])], { encoding: 'utf8' });
     return Object.fromEntries(out.trim().split('\n').map((l) => { const [n, cpu, mem] = l.split('\t'); return [n!.replace(/^konsilium-load-|-1$/g, ''), `${cpu} · ${mem?.split(' / ')[0]}`]; }));
   } catch {
@@ -81,6 +81,24 @@ function cpuSeconds(pid: number): number {
 function psql(sql: string, db = 'synapse'): string {
   try {
     return execFileSync('docker', ['exec', PG_CONTAINER, 'psql', '-U', 'synapse', '-d', db, '-Atc', sql], { encoding: 'utf8' }).trim();
+  } catch {
+    return '?';
+  }
+}
+
+/** Имя и версия сервера: Tuwunel отвечает на /_tuwunel/server_version, Synapse — на admin API. */
+async function serverVersion(): Promise<string> {
+  const tuwunel = await hs.call<{ name?: string; version?: string }>('GET', '/_tuwunel/server_version', null).catch(() => null);
+  if (tuwunel?.status === 200) return `${tuwunel.json.name} ${tuwunel.json.version}`;
+  const synapse = await hs.call<{ server_version?: string }>('GET', '/_synapse/admin/v1/server_version', null).catch(() => null);
+  return `Synapse ${synapse?.json.server_version ?? '?'}`;
+}
+
+/** Размер тома Docker на диске (база Tuwunel — RocksDB в томе, в образе нет оболочки). */
+function volumeSize(volume: string): string {
+  try {
+    const dir = execFileSync('docker', ['volume', 'inspect', volume, '--format', '{{.Mountpoint}}'], { encoding: 'utf8' }).trim();
+    return execFileSync('du', ['-sh', dir], { encoding: 'utf8' }).split('\t')[0]!;
   } catch {
     return '?';
   }
@@ -159,7 +177,9 @@ interface CaseRoom {
 
 async function main() {
   const versions = await fetch(`${HS_URL}/_matrix/client/versions`).catch(() => null);
-  if (!versions?.ok) throw new Error(`Synapse недоступен на ${HS_URL}. См. tools/load/docker-compose.load.yml`);
+  if (!versions?.ok) throw new Error(`Сервер Matrix недоступен на ${HS_URL}. См. tools/load/docker-compose.load.yml`);
+  results.server = await serverVersion();
+  log(`сервер: ${results.server}`);
   const ccs = await startCcs();
   const ccsPid = ccs.pid!;
 
@@ -522,12 +542,14 @@ async function main() {
     all_at_once_phases: { open_ccs: phases.open.summary(), join: phases.join.summary(), history: phases.history.summary() },
   };
 
-  results.database = {
-    synapse_db: psql("select pg_size_pretty(pg_database_size('synapse'))"),
-    rooms: psql('select count(*) from rooms'),
-    events: psql('select count(*) from events'),
-    users: psql('select count(*) from users'),
-  };
+  results.database = String(results.server).startsWith('Tuwunel')
+    ? { tuwunel_rocksdb: volumeSize(`${SYNAPSE_CONTAINER.replace(/-synapse-1$/, '')}_tuwunel-data`), rooms_created: withChat.length }
+    : {
+        synapse_db: psql("select pg_size_pretty(pg_database_size('synapse'))"),
+        rooms: psql('select count(*) from rooms'),
+        events: psql('select count(*) from events'),
+        users: psql('select count(*) from users'),
+      };
   results.finished_at = new Date().toISOString();
   ccs.kill('SIGTERM');
   mkdirSync(resolve(OUT, '..'), { recursive: true });

@@ -1,0 +1,7 @@
+# Нагрузочный стенд на Tuwunel (infra/docker-compose.tuwunel.yml) — порт 18008, как у Synapse:
+#   docker compose -p konsilium-load -f infra/docker-compose.yml -f infra/docker-compose.tuwunel.yml \
+#     -f tools/load/docker-compose.load.yml -f tools/load/docker-compose.load-tuwunel.yml up -d tuwunel
+services:
+  tuwunel:
+    ports: !override
+      - "18008:8008"

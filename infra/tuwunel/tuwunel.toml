@@ -1,0 +1,44 @@
+# Tuwunel (Apache-2.0) вместо Synapse — для сравнения (docs/11-load-test.md, раздел 7): окружение разработчика
+# (infra/docker-compose.tuwunel.yml) и нагрузочный стенд (tools/load/docker-compose.load-tuwunel.yml).
+# Все секреты здесь — только для разработки.
+[global]
+server_name = "konsilium.test"
+database_path = "/var/lib/tuwunel"
+address = ["0.0.0.0"]
+port = 8008
+
+# Закрытый контур: без федерации и внешних серверов ключей.
+allow_federation = false
+trusted_servers = []
+
+# Пользователей стенда и тестов регистрирует registerUser (apps/host-mock/src/users.ts) по токену:
+# admin API с общим секретом, как у Synapse, у Tuwunel нет. Токен — тот же dev-only-секрет.
+allow_registration = true
+registration_token = "dev-only-registration-shared-secret"
+# По умолчанию Tuwunel дописывает к имени нового пользователя значок.
+new_user_displayname_suffix = ""
+
+# Сервис контекста — Application Service, регистрация та же, что у Synapse (infra/synapse/appservice-ccs.yaml).
+appservice_dir = "/etc/tuwunel/appservices"
+
+log = "warn"
+
+# Единый вход: Keycloak окружения разработчика (infra/keycloak), клиент тот же, что у Synapse. Браузер ходит
+# на localhost:8180, сервер — на keycloak:8080, поэтому адреса заданы явно, без discovery.
+[[global.identity_provider]]
+brand = "keycloak"
+name = "учётную запись организации"
+client_id = "synapse"
+client_secret = "dev-only-oidc-client-secret-0123456789"
+issuer_url = "http://localhost:8180/realms/konsilium"
+callback_url = "http://localhost:8008/_matrix/client/unstable/login/sso/callback/synapse"
+discovery = false
+authorization_url = "http://localhost:8180/realms/konsilium/protocol/openid-connect/auth"
+token_url = "http://keycloak:8080/realms/konsilium/protocol/openid-connect/token"
+userinfo_url = "http://keycloak:8080/realms/konsilium/protocol/openid-connect/userinfo"
+scope = ["openid", "profile"]
+# Логин Keycloak = логин Matrix; свой Keycloak — доверенный: вход в уже заведённую учётную запись,
+# как allow_existing_users у Synapse.
+userid_claims = ["preferred_username"]
+trusted = true
+unique_id_fallbacks = false
