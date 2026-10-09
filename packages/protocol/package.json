@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./integration": "./src/integration.ts"
+    "./integration": "./src/integration.ts",
+    "./push": "./src/push.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",

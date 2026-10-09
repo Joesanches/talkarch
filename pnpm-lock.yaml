@@ -64,6 +64,22 @@ importers:
         specifier: ^3.25.0
         version: 3.25.76
 
+  apps/push-gateway:
+    dependencies:
+      '@konsilium/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      fastify:
+        specifier: ^5.2.0
+        version: 5.12.5
+      zod:
+        specifier: ^3.25.0
+        version: 3.25.76
+    devDependencies:
+      '@konsilium/host-mock':
+        specifier: workspace:*
+        version: link:../host-mock
+
   apps/web:
     dependencies:
       '@konsilium/embed':

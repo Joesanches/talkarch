@@ -40,6 +40,13 @@ app_service_config_files:
 
 # Стенд изолирован: федерации нет, предпросмотр ссылок выключен.
 federation_domain_whitelist: []
+# Push-шлюз в контуре (apps/push-gateway) — в частной сети Docker, а к частным адресам push-шлюзов Synapse по умолчанию
+# не ходит. Разрешаем сети Docker; федерация выключена, предпросмотр ссылок тоже — других запросов наружу нет.
+ip_range_whitelist:
+  - 172.16.0.0/12
+# Push-шлюзу — тип события и настройки правил, без содержимого и имён (docs/03-architecture.md, раздел 6).
+push:
+  include_content: false
 url_preview_enabled: false
 max_upload_size: 50M
 

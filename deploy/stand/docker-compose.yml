@@ -91,6 +91,20 @@ services:
       timeout: 3s
       retries: 40
 
+  # Push-шлюз в контуре: сервер сообщений шлёт ему уведомления во внутренней сети; приложения держат прямое соединение
+  # через Caddy (/push/v1/connect), вне сети — внешние сервисы по PUSH_EXTERNAL (docs/03-architecture.md, раздел 6).
+  push-gateway:
+    <<: *app
+    command: ["node", "--import", "tsx", "apps/push-gateway/src/index.ts"]
+    env_file: ./generated/push-gateway.env
+    volumes:
+      - ./generated/push-keys:/config/push-keys:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8075/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
   web:
     image: konsilium-stand-web:latest
     build:
@@ -121,6 +135,7 @@ services:
       retries: 20
     depends_on:
       ccs: { condition: service_healthy }
+      push-gateway: { condition: service_healthy }
 
   # ── Synapse с воркерами (WORKERS=on → профиль workers) ────────────────
   # Схема — infra/synapse/workers: 2 воркера синхронизации, 2 воркера записи событий, Valkey (BSD-3, замена Redis).

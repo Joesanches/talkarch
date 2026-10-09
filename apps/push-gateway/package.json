@@ -1,0 +1,22 @@
+{
+  "name": "@konsilium/push-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Push-шлюз в контуре: Matrix Push Gateway API, прямые соединения с приложениями, сигналы без содержимого через APNs, FCM и RuStore",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run test/unit",
+    "test:it": "vitest run --config vitest.it.config.ts"
+  },
+  "dependencies": {
+    "@konsilium/protocol": "workspace:*",
+    "fastify": "^5.2.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@konsilium/host-mock": "workspace:*"
+  }
+}

@@ -32,7 +32,9 @@ SSO=off — без единого входа через Keycloak (по умол�
 AI=cpu — ИИ-«Секретарь» (стенограмма звонка и черновик протокола) на процессоре: +8 ГБ ОЗУ, +10 ГБ диска;
 LLM_URL=… LLM_MODEL=… — внешний OpenAI-совместимый ИИ-шлюз вместо LLM на стенде (с AI=cpu);
 ARCHIVE_AFTER_DAYS=0 — закрытые случаи уходят в архив в течение минуты (по умолчанию — через 14 дней без активности);
-WORKERS=on — Synapse с воркерами: 2 синхронизации, 2 записи событий, Valkey (+1 ГБ ОЗУ; для нагрузки — от 4 vCPU).
+WORKERS=on — Synapse с воркерами: 2 синхронизации, 2 записи событий, Valkey (+1 ГБ ОЗУ; для нагрузки — от 4 vCPU);
+PUSH_EXTERNAL=off|critical|all — push вне сети организации через APNs, FCM, RuStore (по умолчанию off; ключи сервисов —
+  в generated/push-gateway.env, deploy/stand/README.md).
 USAGE
 }
 
@@ -41,7 +43,7 @@ render() { # render <шаблон> <файл>
   content=$(<"$src")
   for var in DOMAIN DOMAIN_RE PG_PASSWORD REG_SECRET MACAROON_SECRET FORM_SECRET AS_TOKEN HS_TOKEN ALIAS_SECRET \
     LIVEKIT_KEY LIVEKIT_SECRET LIVEKIT_IP LIS_TOKEN LIS_TOKEN_SHA RIS_TOKEN RIS_TOKEN_SHA TEAM_TOKEN_SHA \
-    LIS_CALLBACK_TOKEN DEMO_PASSWORD EMBED_ORIGINS_JSON AI_ENV OIDC_SECRET OIDC_YAML ARCHIVE_AFTER_DAYS SECRETARY_TOKEN; do
+    LIS_CALLBACK_TOKEN DEMO_PASSWORD EMBED_ORIGINS_JSON AI_ENV OIDC_SECRET OIDC_YAML ARCHIVE_AFTER_DAYS SECRETARY_TOKEN PUSH_EXTERNAL; do
     content=${content//"__${var}__"/"${!var}"}
   done
   printf '%s\n' "$content" >"$dst"
@@ -52,7 +54,7 @@ cmd_init() {
   [[ -n $domain ]] || die "укажите домен: ./stand.sh init chat-test.example.ru admin@example.ru"
   # Заданное в командной строке (NODE_IP=… AI=cpu ./stand.sh init …) важнее сохранённого в .env.
   local overrides=() v
-  for v in TLS_MODE NODE_IP EMBED_ORIGINS AI SSO LLM_URL LLM_MODEL BUILD_CA_FILE ARCHIVE_AFTER_DAYS WORKERS; do
+  for v in TLS_MODE NODE_IP EMBED_ORIGINS AI SSO LLM_URL LLM_MODEL BUILD_CA_FILE ARCHIVE_AFTER_DAYS WORKERS PUSH_EXTERNAL; do
     [[ -n ${!v+x} ]] && overrides+=("$v=${!v}")
   done
   if [[ -f $ENV_FILE ]]; then
@@ -97,6 +99,8 @@ cmd_init() {
   [[ $ARCHIVE_AFTER_DAYS =~ ^[0-9]+$ ]] || die "ARCHIVE_AFTER_DAYS — целое число дней"
   WORKERS=${WORKERS:-off}
   [[ $WORKERS == on || $WORKERS == off ]] || die "WORKERS=on или WORKERS=off"
+  PUSH_EXTERNAL=${PUSH_EXTERNAL:-off}
+  [[ $PUSH_EXTERNAL =~ ^(off|critical|all)$ ]] || die "PUSH_EXTERNAL=off, critical или all"
   COMPOSE_PROFILES=
   if [[ $SSO == keycloak ]]; then COMPOSE_PROFILES=sso; fi
   if [[ $AI == cpu ]]; then COMPOSE_PROFILES=${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}ai; fi
@@ -150,6 +154,8 @@ ARCHIVE_AFTER_DAYS=$ARCHIVE_AFTER_DAYS
 # Synapse с воркерами: on | off. Синхронизацию Caddy направляет на SYNAPSE_SYNC_UPSTREAMS.
 WORKERS=$WORKERS
 SYNAPSE_SYNC_UPSTREAMS="$SYNAPSE_SYNC_UPSTREAMS"
+# Push вне сети организации: off | critical | all (docs/03-architecture.md, раздел 6).
+PUSH_EXTERNAL=$PUSH_EXTERNAL
 ENV
 
   DOMAIN_RE=${DOMAIN//./\\.}
@@ -211,7 +217,7 @@ sso:
     LIVEKIT_IP='  use_external_ip: true'
   fi
 
-  mkdir -p "$GEN/synapse"
+  mkdir -p "$GEN/synapse" "$GEN/push-keys"
   render homeserver.yaml synapse/homeserver.yaml
   render appservice-ccs.yaml synapse/appservice-ccs.yaml
   render log.yaml synapse/log.yaml
@@ -228,6 +234,7 @@ sso:
   render realm-konsilium.json realm-konsilium.json
   render ccs.env ccs.env
   render host-mock.env host-mock.env
+  render push-gateway.env push-gateway.env
   umask 022
   render config.json config.json
   if [[ -n $ACME_EMAIL ]]; then echo "email $ACME_EMAIL" >"$GEN/caddy-global.caddy"; else echo "# email для ACME не задан" >"$GEN/caddy-global.caddy"; fi

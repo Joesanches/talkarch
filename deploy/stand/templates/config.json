@@ -1,1 +1,2 @@
-{ "hsUrl": "https://__DOMAIN__", "ccsUrl": "https://__DOMAIN__", "embedOrigins": [__EMBED_ORIGINS_JSON__] }
+{ "hsUrl": "https://__DOMAIN__", "ccsUrl": "https://__DOMAIN__", "embedOrigins": [__EMBED_ORIGINS_JSON__],
+  "push": { "connectUrl": "https://__DOMAIN__/push/v1/connect", "notifyUrl": "http://push-gateway:8075/_matrix/push/v1/notify" } }

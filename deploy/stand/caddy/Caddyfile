@@ -1,4 +1,4 @@
-# Единая точка входа стенда: HTTPS, веб-клиент, Synapse, сервис контекста, сигнализация LiveKit.
+# Единая точка входа стенда: HTTPS, веб-клиент, Synapse, сервис контекста, push-шлюз, сигнализация LiveKit.
 # DOMAIN и TLS_MODE (acme | internal) — из deploy/stand/.env; global.caddy (email для ACME) генерирует ./stand.sh init.
 {
 	import global.caddy
@@ -44,6 +44,13 @@
 	}
 	handle /integration/* {
 		reverse_proxy ccs:8080
+	}
+
+	# Push: прямое соединение приложений со шлюзом (поток SSE) и подтверждения. Приём уведомлений от сервера сообщений
+	# (/_matrix/push/v1/notify) наружу не публикуется — Synapse обращается к шлюзу внутри сети стенда.
+	handle /push/v1/* {
+		uri strip_prefix /push
+		reverse_proxy push-gateway:8075
 	}
 
 	# Единый вход: Keycloak (SSO=keycloak). Консоль администратора — /auth/admin, пароль — KC_ADMIN_PASSWORD в .env.

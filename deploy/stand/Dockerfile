@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Образы стенда из монорепозитория. Контекст сборки — корень репозитория.
-#   target app — сервис контекста и песочница РИС/ЛИС (TypeScript через tsx);
+#   target app — сервис контекста, push-шлюз и песочница РИС/ЛИС (TypeScript через tsx);
 #   target web — Caddy со статическим веб-клиентом.
 
 # BUILD_CA_FILE (секрет сборки build_ca) — корневой сертификат корпоративного прокси, если сеть подменяет TLS.
@@ -16,6 +16,7 @@ FROM base AS deps
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/ccs/package.json apps/ccs/
 COPY apps/host-mock/package.json apps/host-mock/
+COPY apps/push-gateway/package.json apps/push-gateway/
 COPY apps/web/package.json apps/web/
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/tokens/package.json packages/tokens/

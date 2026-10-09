@@ -39,7 +39,7 @@ pnpm dev:web
 ```bash
 pnpm test        # модульные тесты всех пакетов
 pnpm typecheck   # проверка типов
-pnpm test:it     # интеграционные тесты на настоящем Synapse (нужен docker compose up)
+pnpm test:it     # интеграционные тесты сервиса контекста и push-шлюза на настоящем Synapse (нужен docker compose up)
 pnpm e2e         # сквозные тесты веб-клиента: Playwright сам запускает сервис, песочницу и Vite
 ```
 
@@ -115,6 +115,27 @@ set -a && . apps/ccs/.env && set +a && pnpm dev:ccs
 ```bash
 E2E_AI=1 pnpm e2e secretary
 ```
+
+## Push-шлюз
+
+Шлюз в контуре (`apps/push-gateway`, [docs/03-architecture.md, раздел 6](../docs/03-architecture.md#6-push-уведомления)) запускается на хосте, сервер сообщений ходит к нему по адресу `http://host.docker.internal:8075/_matrix/push/v1/notify`:
+
+```bash
+cp apps/push-gateway/.env.example apps/push-gateway/.env
+set -a && . apps/push-gateway/.env && set +a && pnpm dev:push
+curl http://localhost:8075/healthz   # подключённые устройства и доставка по каналам
+```
+
+Synapse и Tuwunel по умолчанию не ходят к push-шлюзам в частных сетях — в окружении разработчика разрешена сеть Docker (`ip_range_whitelist` в `synapse/homeserver.yaml`, `ip_range_denylist` в `tuwunel/tuwunel.toml`). Synapse не передаёт шлюзу содержимое сообщений (`push.include_content: false`).
+
+Мобильных приложений пока нет; прямое соединение можно проверить вручную — так его держит приложение:
+
+```bash
+PUSHKEY=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')
+curl -N -H "Authorization: Bearer $PUSHKEY" http://localhost:8075/v1/connect   # поток сигналов (event: push)
+```
+
+Интеграционный тест (`pnpm --filter @konsilium/push-gateway test:it`, входит в `pnpm test:it`) ставит pusher и правила push, как это будет делать приложение, и проверяет на настоящем сервере сообщений: сообщение, критическую находку и звонок по прямому соединению, затем внешний канал. Тест сам поднимает шлюз на порту 8076.
 
 ## Synapse с воркерами
 
