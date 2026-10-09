@@ -23,6 +23,7 @@ const paths: Record<string, string> = {
   reply: 'M10 8L5 12l5 4M5 12h9a5 5 0 0 1 5 5v1',
   attach: 'M20 11.5l-8.3 8.3a5 5 0 0 1-7-7l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8',
   file: 'M6 3h8l5 5v13H6zM14 3v5h5',
+  close: 'M6 6l12 12M18 6L6 18',
 };
 
 export function Icon({ name, size = 22 }: { name: keyof typeof paths | string; size?: number }) {

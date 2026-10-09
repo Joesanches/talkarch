@@ -207,9 +207,12 @@ export const SlideRoi = MessageBase.extend({
   msgtype: z.literal(MsgType.SlideRoi),
   [MsgType.SlideRoi]: z.object({
     slide_id: z.string().min(1),
+    /** Блок, из которого стекло (например, «1Б»). */
+    block: z.string().min(1).optional(),
     stain: z.string().min(1),
     magnification: z.number().positive(),
-    region: z.object({ x: z.number(), y: z.number(), w: z.number().positive(), h: z.number().positive(), level: z.number().int().nonnegative() }),
+    /** Область на скане; без неё — всё стекло. */
+    region: z.object({ x: z.number(), y: z.number(), w: z.number().positive(), h: z.number().positive(), level: z.number().int().nonnegative() }).optional(),
     thumbnail: z.string().startsWith('mxc://').optional(),
     link: z.object({ kind: z.literal('viewer'), url: z.string().url() }).optional(),
   }),

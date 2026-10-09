@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { MsgType, KeyImage, type CaseContext } from '@konsilium/protocol';
-import type { KeyImageAttachment, UnreadItem } from '@konsilium/embed/protocol';
+import { MsgType, KeyImage, SlideRoi, type CaseContext } from '@konsilium/protocol';
+import type { KeyImageAttachment, SlideAttachment, UnreadItem } from '@konsilium/embed/protocol';
 import { EventType, RoomType } from '@konsilium/protocol';
-import { NotificationCountType, type MatrixClient } from 'matrix-js-sdk';
-import { roomCriticals } from './matrix.ts';
+import type { MatrixClient } from 'matrix-js-sdk';
+import { roomCriticals, unreadCount } from './matrix.ts';
 import { criticalWaitingFor, parseCaseContext } from './model.ts';
 
 /**
@@ -111,15 +111,37 @@ export async function downloadMedia(client: MatrixClient, mxc: string, filename:
 
 const MAX_THUMBNAIL = 2 * 1024 * 1024;
 
+/** Миниатюра от хоста (data: URL) → файл на сервере сообщений. */
+async function uploadThumbnail(client: MatrixClient, dataUrl: string | undefined, name: string): Promise<string | undefined> {
+  if (!dataUrl) return undefined;
+  if (!/^data:image\/(png|jpeg|webp);base64,/.test(dataUrl)) throw new Error('Миниатюра должна быть data:image/png, jpeg или webp');
+  const blob = await (await fetch(dataUrl)).blob();
+  if (blob.size > MAX_THUMBNAIL) throw new Error('Миниатюра больше 2 МБ');
+  return (await client.uploadContent(blob, { type: blob.type, name })).content_uri;
+}
+
+/** Стекло или область препарата из ЛИС → сообщение ru.vendor.slide_roi (миниатюра загружается на сервер сообщений). */
+export async function sendSlideRoi(client: MatrixClient, roomId: string, att: SlideAttachment): Promise<void> {
+  const thumbnail = await uploadThumbnail(client, att.thumbnail, 'slide');
+  const content = SlideRoi.parse({
+    msgtype: MsgType.SlideRoi,
+    body: att.caption?.trim() || `Стекло ${att.slideId}${att.block ? `, блок ${att.block}` : ''}: ${att.stain}`,
+    [MsgType.SlideRoi]: {
+      slide_id: att.slideId,
+      ...(att.block ? { block: att.block } : {}),
+      stain: att.stain,
+      magnification: att.magnification,
+      ...(att.region ? { region: att.region } : {}),
+      ...(thumbnail ? { thumbnail } : {}),
+      ...(att.viewerUrl ? { link: { kind: 'viewer', url: att.viewerUrl } } : {}),
+    },
+  });
+  await client.sendMessage(roomId, content as never);
+}
+
 /** Ключевой снимок из вьюера хоста → сообщение ru.vendor.key_image (миниатюра загружается на сервер сообщений). */
 export async function sendKeyImage(client: MatrixClient, roomId: string, att: KeyImageAttachment): Promise<void> {
-  let thumbnail: string | undefined;
-  if (att.thumbnail) {
-    if (!/^data:image\/(png|jpeg|webp);base64,/.test(att.thumbnail)) throw new Error('Миниатюра должна быть data:image/png, jpeg или webp');
-    const blob = await (await fetch(att.thumbnail)).blob();
-    if (blob.size > MAX_THUMBNAIL) throw new Error('Миниатюра больше 2 МБ');
-    thumbnail = (await client.uploadContent(blob, { type: blob.type, name: 'key-image' })).content_uri;
-  }
+  const thumbnail = await uploadThumbnail(client, att.thumbnail, 'key-image');
   const frame = att.frame ?? 1;
   const content = KeyImage.parse({
     msgtype: MsgType.KeyImage,
@@ -150,7 +172,7 @@ export function caseUnread(client: MatrixClient): Array<UnreadItem & { roomId: s
       roomId: room.roomId,
       connector: ctx.connector,
       caseId: ctx.case_id,
-      unread: membership === 'invite' ? 0 : room.getUnreadNotificationCount(NotificationCountType.Total),
+      unread: membership === 'invite' ? 0 : unreadCount(room),
       invited: membership === 'invite',
       critical: me ? criticalWaitingFor(roomCriticals(room), me).length : 0,
     });

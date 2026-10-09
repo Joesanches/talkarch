@@ -113,3 +113,14 @@ describe('критическая находка', () => {
     expect(CriticalMessage.safeParse({ ...base, [MsgType.Critical]: { finding: 'ТЭЛА', recipient: { role: 'on_duty' }, ack_deadline: 'PT' } }).success).toBe(false);
   });
 });
+
+describe('препарат из ЛИС (ru.vendor.slide_roi)', () => {
+  it('блок и область необязательны: всё стекло — без области', async () => {
+    const { SlideRoi, MsgType, parseStructured } = await import('../src/index.ts');
+    const base = { msgtype: MsgType.SlideRoi, body: 'Стекло 2, блок 1Б: H&E' };
+    expect(SlideRoi.safeParse({ ...base, [MsgType.SlideRoi]: { slide_id: '2', stain: 'H&E', magnification: 20 } }).success).toBe(true);
+    const roi = { slide_id: '2', block: '1Б', stain: 'H&E', magnification: 20, region: { x: 13824, y: 8400, w: 2048, h: 2048, level: 0 }, thumbnail: 'mxc://konsilium.test/abc' };
+    expect(parseStructured({ ...base, [MsgType.SlideRoi]: roi })).toMatchObject({ [MsgType.SlideRoi]: { block: '1Б', region: { w: 2048 } } });
+    expect(SlideRoi.safeParse({ ...base, [MsgType.SlideRoi]: { ...roi, region: { x: 0, y: 0, w: 0, h: 10, level: 0 } } }).success).toBe(false);
+  });
+});

@@ -3,7 +3,7 @@ import { envelope, isEnvelope, type ChatEvents, type Envelope, type HostCommands
 type Handler<K extends keyof HostCommands> = (payload: HostCommands[K]) => void | Promise<void>;
 
 /** Команды, которые можно принять до входа пользователя: применятся, когда чат будет готов. */
-const DEFERRABLE = new Set<keyof HostCommands>(['context.set', 'unread.watch', 'theme.set', 'room.open', 'auth.token']);
+const DEFERRABLE = new Set<keyof HostCommands>(['context.set', 'unread.watch', 'theme.set', 'room.open', 'auth.token', 'view.visible']);
 
 /**
  * Связь фрейма чата с хостом. Принимает сообщения только от родительского окна и только с разрешённого origin,

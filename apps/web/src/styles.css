@@ -1556,3 +1556,77 @@ button.quote {
   color: inherit;
   border-radius: 3px;
 }
+
+/* ── Препарат из ЛИС, непрочитанное, «печатает…» ───────────────────── */
+.slide-roi {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-width: min(260px, 100%);
+  padding: 2px 0;
+}
+.slide-roi-thumb {
+  width: 72px;
+  height: 72px;
+  border-radius: 9px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: #f6d7e4;
+}
+.slide-roi-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.slide-roi-body {
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+}
+.slide-roi-title {
+  font-weight: 600;
+}
+.slide-roi-caption {
+  font-size: 13px;
+}
+.slide-roi .ghost {
+  margin-top: 4px;
+}
+.unread-divider {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0 4px;
+}
+.unread-divider span {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgb(22 32 43 / 0.55);
+  color: #fff;
+  font-size: 12px;
+}
+.typing {
+  padding: 4px 16px 0;
+  font-size: 12.5px;
+  color: var(--color-neutral-text-meta);
+  background: var(--color-neutral-surface);
+  border-top: 1px solid var(--color-neutral-border);
+}
+.typing + .composer-wrap,
+.typing + .composer {
+  border-top: 0;
+}
+.chat-heading {
+  min-width: 0;
+  flex: 1;
+}
+.chat-heading .chat-title,
+.chat-heading .chat-subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-subtitle .mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}

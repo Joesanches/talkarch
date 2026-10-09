@@ -14,6 +14,7 @@ import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { CaseRole, type RequestStep } from '@konsilium/protocol';
 import { renderRisDemo } from './demo.ts';
+import { renderLisDemo } from './lis-demo.ts';
 import {
   AccessCheckRequest,
   CaseSnapshot,
@@ -213,6 +214,13 @@ export function createHostMock(opts: HostMockOptions) {
     const studies = (cases.get('ris') ?? []).map((c) => ({ snapshot: c.snapshot, patientName: c.host_only.patient?.display_name ?? c.snapshot.patient.masked }));
     reply.type('text/html; charset=utf-8').header('cache-control', 'no-store');
     return renderRisDemo((opts.chatUrl ?? 'http://localhost:5173').replace(/\/$/, ''), studies);
+  });
+
+  // Демо-страница ЛИС: форма случая с плавающим чатом и «В чат» у стекла (?case=Г26-04530 — другой случай).
+  app.get('/demo/lis', async (req, reply) => {
+    const selected = (req.query as { case?: string }).case;
+    reply.type('text/html; charset=utf-8').header('cache-control', 'no-store');
+    return renderLisDemo((opts.chatUrl ?? 'http://localhost:5173').replace(/\/$/, ''), (cases.get('lis') ?? []).map((c) => c.snapshot), selected);
   });
 
   app.get('/:connector/cases/:caseId', async (req, reply) => {

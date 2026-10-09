@@ -2,6 +2,7 @@ import { useEffect, useReducer, useState } from 'react';
 import {
   ClientEvent,
   RoomEvent,
+  RoomMemberEvent,
   RoomStateEvent,
   SyncState,
   createClient,
@@ -106,6 +107,24 @@ export function startClient(s: Session): MatrixClient {
   return client;
 }
 
+/**
+ * Непрочитанные сообщения — считаются на клиенте: Simplified Sliding Sync в Synapse отдаёт notification_count = 0
+ * («уведомления правильно считает только клиент»). Чужие сообщения после моей отметки о прочтении или моего сообщения.
+ * Считается по загруженной ленте (в списке — последние события комнаты), поэтому число — не меньше настоящего.
+ */
+export function unreadCount(room: Room): number {
+  const me = room.myUserId;
+  const events = room.getLiveTimeline().getEvents();
+  let n = 0;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i]!;
+    const id = e.getId();
+    if (e.getSender() === me || (id && room.hasUserReadEvent(me, id))) break;
+    if (e.getType() === 'm.room.message' && !e.isRedacted()) n++;
+  }
+  return n;
+}
+
 /** Чат случая в архиве: только чтение. Состояние пишет только сервис контекста (уровень 100). */
 export const roomArchived = (room: Room) => isArchivedState(room.currentState.getStateEvents(EventType.CaseArchive, '')?.getContent());
 
@@ -161,11 +180,14 @@ export function useClientUpdates(client: MatrixClient): number {
     for (const e of events) client.on(e, schedule);
     for (const e of roomEvents) client.on(e, schedule);
     client.on(RoomStateEvent.Events, schedule);
+    // «Печатает…» — уведомления о наборе от других участников.
+    client.on(RoomMemberEvent.Typing, schedule);
     return () => {
       if (timer) clearTimeout(timer);
       for (const e of events) client.off(e, schedule);
       for (const e of roomEvents) client.off(e, schedule);
       client.off(RoomStateEvent.Events, schedule);
+      client.off(RoomMemberEvent.Typing, schedule);
     };
   }, [client]);
   return version;

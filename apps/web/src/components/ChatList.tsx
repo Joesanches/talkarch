@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { NotificationCountType, type MatrixClient, type Room } from 'matrix-js-sdk';
+import type { MatrixClient, Room } from 'matrix-js-sdk';
 import { EventType, RoomType } from '@konsilium/protocol';
 import { avatarColor, caseCode, criticalWaitingFor, formatListTime, highlightParts, initials, parseCaseContext, preview, priorityLabel, snippet } from '../model.ts';
-import { roomArchived, roomCriticals, searchMessages, toItem, type MessageHit } from '../matrix.ts';
+import { roomArchived, roomCriticals, searchMessages, toItem, unreadCount, type MessageHit } from '../matrix.ts';
 import { Icon } from './Icon.tsx';
 
 const kindColor: Record<string, string> = { LIS: 'var(--color-kind-pathology)', RIS: 'var(--color-kind-radiology)', TMK: 'var(--color-kind-consilium)' };
@@ -81,7 +81,7 @@ export function ChatList(props: {
           const item = last ? toItem(last) : undefined;
           const senderName = item ? (room.getMember(item.sender)?.name ?? item.sender) : '';
           const invite = room.getMyMembership() === 'invite';
-          const unread = room.getUnreadNotificationCount(NotificationCountType.Total);
+          const unread = unreadCount(room);
           const prio = ctx?.priority ? priorityLabel[ctx.priority] : '';
           const critical = ctx && me ? criticalWaitingFor(roomCriticals(room), me).length : 0;
           return (

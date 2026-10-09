@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react';
 import { Direction, EventStatus, type MatrixClient, type MatrixEvent, type Room } from 'matrix-js-sdk';
-import { EventType, MsgType, RoomType, parseStructured, type CaseContext, type CaseRolesContent, type KeyImage, type TranscriptSegment } from '@konsilium/protocol';
+import { EventType, MsgType, RoomType, parseStructured, type CaseContext, type CaseRolesContent, type KeyImage, type SlideRoi, type TranscriptSegment } from '@konsilium/protocol';
 import type { LinkOpen } from '@konsilium/embed/protocol';
 import {
+  firstUnreadIndex,
+  typingText,
   attachmentProblem,
   formatSize,
   quoteText,
@@ -33,7 +35,7 @@ import {
 } from '../model.ts';
 import { activeCall, formatDuration } from '../call.ts';
 import { config } from '../config.ts';
-import { closeArchived, roomArchived, roomCriticals, toItem } from '../matrix.ts';
+import { closeArchived, roomArchived, roomCriticals, toItem, unreadCount } from '../matrix.ts';
 import { downloadMedia, maxUploadBytes, sendAttachment, useAuthedMedia } from '../media.ts';
 import { ProtocolDraftCard, TranscriptCard } from './AiCards.tsx';
 import { CriticalBar, CriticalCard, CriticalForm } from './Critical.tsx';
@@ -222,6 +224,42 @@ function KeyImageCard({ client, msg, onOpenLink }: { client: MatrixClient; msg: 
   );
 }
 
+/**
+ * Препарат из ЛИС: миниатюра области, стекло, блок, окраска, увеличение. «Открыть во вьюере» — во встроенном режиме
+ * решает ЛИС (своё окно цифровой патологии), иначе — по ссылке вьюера, если она есть.
+ */
+function SlideRoiCard({ client, msg, onOpenLink, embedded }: { client: MatrixClient; msg: SlideRoi; onOpenLink: OpenLink; embedded: boolean }) {
+  const s = msg[MsgType.SlideRoi];
+  const src = useAuthedMedia(client, s.thumbnail, { w: 320, h: 320 });
+  const title = `Стекло ${s.slide_id}${s.block ? ` · блок ${s.block}` : ''}`;
+  const meta = [s.stain, `×${s.magnification}`, s.region ? 'область' : 'всё стекло'].join(' · ');
+  const canOpen = embedded || !!s.link;
+  return (
+    <div className="slide-roi" aria-label="Препарат">
+      <div className="slide-roi-thumb">{src ? <img src={src} alt={title} /> : <span className="meta">Препарат</span>}</div>
+      <div className="slide-roi-body">
+        <div className="slide-roi-title">{title}</div>
+        <div className="meta">{meta}</div>
+        {msg.body && !msg.body.startsWith('Стекло ') && <div className="slide-roi-caption">{msg.body}</div>}
+        {canOpen && (
+          <button
+            className="ghost"
+            onClick={() =>
+              onOpenLink(
+                embedded || !s.link
+                  ? { kind: 'slide', slideId: s.slide_id, stain: s.stain, magnification: s.magnification, region: s.region ?? { x: 0, y: 0, w: 1, h: 1, level: 0 } }
+                  : { kind: 'url', url: s.link.url },
+              )
+            }
+          >
+            Открыть во вьюере
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Кнопка «Отметить» у сообщения: пять реакций-статусов. */
 function ReactionPicker({ onPick }: { onPick: (key: string) => void }) {
   const [open, setOpen] = useState(false);
@@ -336,10 +374,21 @@ function Composer({
     if (reply) input.current?.focus();
   }, [reply]);
 
+  // «Печатает…» для собеседников: не чаще раза в 4 с, пока есть текст; стёр текст или отправил — перестал.
+  const typingSent = useRef(0);
+  function typing(on: boolean) {
+    const now = Date.now();
+    if (on && now - typingSent.current < 4000) return;
+    if (!on && !typingSent.current) return;
+    typingSent.current = on ? now : 0;
+    void client.sendTyping(room.roomId, on, on ? 6000 : 0).catch(() => undefined);
+  }
+
   async function send() {
     const body = text.trim();
     if (!body) return;
     setText('');
+    typing(false);
     const target = reply;
     onCancelReply();
     // Ответ: ссылка на исходное сообщение и упоминание его автора (уведомление), без цитаты в тексте (Matrix 1.13).
@@ -438,7 +487,11 @@ function Composer({
           rows={1}
           placeholder={reply ? 'Ответ' : 'Сообщение'}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            typing(!!e.target.value.trim());
+          }}
+          onBlur={() => typing(false)}
           onKeyDown={onKey}
           onPaste={(e) => {
             // Снимок экрана из буфера обмена — вложением.
@@ -552,10 +605,22 @@ export function ChatView({
   embedded = false,
   onOpenLink = openInNewTab,
   focusEventId = null,
+  active = true,
+  compact = false,
+  onMinimize,
+  fullUrl,
 }: {
   client: MatrixClient;
   room: Room;
   onBack: () => void;
+  /** Чат на экране. Свёрнутый (окно launcher во встроенном режиме) не отмечает сообщения прочитанными. */
+  active?: boolean;
+  /** Узкое окно поверх страницы хоста: без карточки случая — хост её уже показывает. */
+  compact?: boolean;
+  /** Кнопка «Свернуть» в заголовке (launcher). */
+  onMinimize?: () => void;
+  /** Кнопка «Открыть в полном окне» — адрес чата в отдельном клиенте. */
+  fullUrl?: string;
   /** Показать это сообщение (результат поиска): прокрутить к нему и подсветить. */
   focusEventId?: string | null;
   /** Архивный чат убран из списка. */
@@ -609,6 +674,24 @@ export function ChatView({
   const joined = room.getMyMembership() === 'join';
   const writable = joined && !archived;
   const call = activeCall(room);
+
+  // Разделитель «Непрочитанные сообщения»: отметка о прочтении запоминается каждый раз, когда чат появляется на экране
+  // (до того, как он отметит новые сообщения прочитанными), и не двигается, пока он открыт.
+  const readMark = () => ({ readUpTo: room.getEventReadUpTo(me), unread: unreadCount(room) });
+  const [mark, setMark] = useState<{ readUpTo: string | null; unread: number } | null>(() => (active ? readMark() : null));
+  const wasActive = useRef(active);
+  useEffect(() => {
+    if (active && !wasActive.current) setMark(readMark());
+    wasActive.current = active;
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
+  const unreadAt = mark ? firstUnreadIndex(items, me, mark.readUpTo, mark.unread) : null;
+
+  const typingNow = typingText(
+    room
+      .getMembers()
+      .filter((m) => m.typing && m.userId !== me)
+      .map((m) => m.name),
+  );
 
   // Ответы: исходные сообщения, которых нет в загруженной ленте, запрашиваются у сервера.
   const byId = new Map(items.map((e) => [e.eventId, e]));
@@ -688,10 +771,10 @@ export function ChatView({
   // Отметка о прочтении последнего события.
   useEffect(() => {
     const last = events.at(-1);
-    if (last && last.getId()?.startsWith('$') && room.getMyMembership() === 'join' && document.visibilityState === 'visible') {
+    if (active && last && last.getId()?.startsWith('$') && room.getMyMembership() === 'join' && document.visibilityState === 'visible') {
       void client.sendReadReceipt(last).catch(() => undefined);
     }
-  }, [lastId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [lastId, active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [loadingOlder, setLoadingOlder] = useState(false);
   const canLoadOlder = room.getLiveTimeline().getPaginationToken(Direction.Backward) !== null;
@@ -712,6 +795,15 @@ export function ChatView({
     group = null;
   };
   items.forEach((e, i) => {
+    if (i === unreadAt) {
+      flush();
+      prevSender = '';
+      rows.push(
+        <div key="unread" className="unread-divider" role="separator">
+          <span>Непрочитанные сообщения</span>
+        </div>,
+      );
+    }
     const day = formatDay(e.ts);
     if (day !== lastDay) {
       flush();
@@ -761,12 +853,14 @@ export function ChatView({
     const request = e.content.msgtype === MsgType.Request ? requests.get(e.eventId) : undefined;
     const structured =
       e.content.msgtype === MsgType.KeyImage ||
+      e.content.msgtype === MsgType.SlideRoi ||
       e.content.msgtype === MsgType.Critical ||
       ((e.content.msgtype === MsgType.Transcript || e.content.msgtype === MsgType.Report) && fromService(e))
         ? parseStructured(e.content)
         : null;
     const criticalMsg = structured?.msgtype === MsgType.Critical ? structured : null;
     const keyImage = structured?.msgtype === MsgType.KeyImage ? structured : null;
+    const slide = structured?.msgtype === MsgType.SlideRoi ? structured : null;
     const transcript = structured?.msgtype === MsgType.Transcript ? structured : null;
     const draft = structured?.msgtype === MsgType.Report && structured[MsgType.Report].kind === 'consilium_protocol' ? structured : null;
     const replyId = replyTarget(e.content);
@@ -786,6 +880,8 @@ export function ChatView({
             <RequestCard view={request} />
           ) : keyImage ? (
             <KeyImageCard client={client} msg={keyImage} onOpenLink={onOpenLink} />
+          ) : slide ? (
+            <SlideRoiCard client={client} msg={slide} onOpenLink={onOpenLink} embedded={embedded} />
           ) : criticalMsg ? (
             <CriticalCard client={client} roomId={room.roomId} eventId={e.eventId} msg={criticalMsg} sender={e.sender} status={criticals.get(e.eventId)} me={me} name={name} />
           ) : transcript ? (
@@ -848,25 +944,41 @@ export function ChatView({
           </button>
         )}
         <RoomAvatar room={room} size="small" />
-        <div>
-          <div className="chat-title">{room.name}</div>
+        {/* Узкое окно поверх ЛИС: «Чат случая», под ним номер — название случая хост уже показывает. */}
+        <div className="chat-heading">
+          <div className="chat-title">{compact && ctx ? 'Чат случая' : room.name}</div>
           <div className="chat-subtitle">
-            {ctx ? `Чат случая · ${systemLabel[ctx.source] ?? ctx.source} · ` : ''}
+            {ctx && compact ? <span className="mono">{ctx.case_id}</span> : null}
+            {ctx ? (compact ? ' · ' : `Чат случая · ${systemLabel[ctx.source] ?? ctx.source} · `) : ''}
             {members} {members % 10 === 1 && members % 100 !== 11 ? 'участник' : members % 10 >= 2 && members % 10 <= 4 && (members % 100 < 12 || members % 100 > 14) ? 'участника' : 'участников'}
           </div>
         </div>
-        {writable && (
+        {(writable || onMinimize || fullUrl) && (
           <div className="chat-actions">
-            <button className="icon-btn" onClick={() => onCall(false)} aria-label="Аудиозвонок" title="Аудиозвонок" disabled={inCall}>
-              <Icon name="phone" />
-            </button>
-            <button className="icon-btn" onClick={() => onCall(true)} aria-label="Видеозвонок" title="Видеозвонок" disabled={inCall}>
-              <Icon name="video" />
-            </button>
+            {writable && !compact && (
+              <button className="icon-btn" onClick={() => onCall(false)} aria-label="Аудиозвонок" title="Аудиозвонок" disabled={inCall}>
+                <Icon name="phone" />
+              </button>
+            )}
+            {writable && !compact && (
+              <button className="icon-btn" onClick={() => onCall(true)} aria-label="Видеозвонок" title="Видеозвонок" disabled={inCall}>
+                <Icon name="video" />
+              </button>
+            )}
+            {fullUrl && (
+              <button className="icon-btn" onClick={() => window.open(fullUrl, '_blank', 'noopener')} aria-label="Открыть в полном окне" title="Открыть в полном окне">
+                <Icon name="external" />
+              </button>
+            )}
+            {onMinimize && (
+              <button className="icon-btn" onClick={onMinimize} aria-label="Свернуть чат" title="Свернуть чат">
+                <Icon name="close" />
+              </button>
+            )}
           </div>
         )}
       </header>
-      {ctx && <CaseBar ctx={ctx} onOpenLink={onOpenLink} client={client} roomId={room.roomId} archived={archived} />}
+      {ctx && !compact && <CaseBar ctx={ctx} onOpenLink={onOpenLink} client={client} roomId={room.roomId} archived={archived} />}
       {writable && <CriticalBar client={client} roomId={room.roomId} waiting={waiting} />}
       {call && !inCall && writable && (
         <div className="call-banner" role="status">
@@ -904,6 +1016,11 @@ export function ChatView({
         )}
         {rows}
       </div>
+      {typingNow && (
+        <div className="typing" aria-live="polite">
+          {typingNow}
+        </div>
+      )}
       {archived ? (
         // Встроенный чат привязан к случаю РИС/ЛИС — убирать его из списка там незачем.
         <ArchivedBar client={client} room={room} onClosed={onClosed} canClose={!embedded} />

@@ -7,7 +7,7 @@ import { ChatView } from '../components/ChatView.tsx';
 import { Login } from '../components/Login.tsx';
 import { isAllowedHostOrigin } from '../config.ts';
 import { CcsError, clearSession, loadSession, openCase, saveSession, sessionFromToken, startClient, useClientUpdates, useSyncState, type Session } from '../matrix.ts';
-import { caseUnread, sendKeyImage } from '../media.ts';
+import { caseUnread, sendKeyImage, sendSlideRoi } from '../media.ts';
 import { focusRooms } from '../sync.ts';
 import { bridgeFor, type Bridge } from './bridge.ts';
 
@@ -112,6 +112,9 @@ function EmbedInner({ client, session, mode, bridge, initial, onUnauthorized }: 
   const [watch, setWatch] = useState<Set<string> | null>(null);
   const [call, setCall] = useState<{ video: boolean } | null>(null);
   const [callMinimized, setCallMinimized] = useState(false);
+  // Окно launcher открыто? До первой команды хоста — свёрнуто (так SDK его и создаёт).
+  const [visible, setVisible] = useState(mode !== 'launcher');
+  useEffect(() => bridge.on('view.visible', ({ visible: v }) => setVisible(v)), [bridge]);
 
   useEffect(() => bridge.on('context.set', (ctx) => setContext(ctx)), [bridge]);
   useEffect(
@@ -122,8 +125,9 @@ function EmbedInner({ client, session, mode, bridge, initial, onUnauthorized }: 
   useEffect(
     () =>
       bridge.on('compose.attach', async (att) => {
-        if (!roomId) throw new Error('Чат исследования ещё не открыт');
-        await sendKeyImage(client, roomId, att);
+        if (!roomId) throw new Error('Чат случая ещё не открыт');
+        if (att.kind === 'slide_roi') await sendSlideRoi(client, roomId, att);
+        else await sendKeyImage(client, roomId, att);
       }),
     [bridge, client, roomId],
   );
@@ -190,6 +194,14 @@ function EmbedInner({ client, session, mode, bridge, initial, onUnauthorized }: 
             embedded
             onBack={() => undefined}
             onOpenLink={(link) => bridge.send('link.open', link)}
+            active={visible}
+            {...(mode === 'launcher'
+              ? {
+                  compact: true,
+                  onMinimize: () => bridge.send('view.minimize', {}),
+                  fullUrl: context?.connector ? `${location.origin}/c/${encodeURIComponent(context.connector)}/${encodeURIComponent(context.caseId)}` : undefined,
+                }
+              : {})}
             inCall={!!call}
             onCall={(video) => {
               setCall({ video });

@@ -31,7 +31,26 @@ export interface KeyImageAttachment {
   viewerUrl?: string;
 }
 
-export type Attachment = KeyImageAttachment;
+/** Стекло или область препарата из ЛИС/вьюера цифровой патологии («В чат» у стекла). */
+export interface SlideAttachment {
+  kind: 'slide_roi';
+  /** Номер или идентификатор стекла в ЛИС. */
+  slideId: string;
+  block?: string;
+  /** Окраска: H&E, ER, HER2… */
+  stain: string;
+  /** Увеличение объектива для области, ×. */
+  magnification: number;
+  /** Область на скане (пиксели уровня `level`); без области — всё стекло. */
+  region?: { x: number; y: number; w: number; h: number; level: number };
+  caption?: string;
+  /** Миниатюра как data:image/png;base64,… — чат загрузит её на сервер сообщений. */
+  thumbnail?: string;
+  /** Ссылка во вьюер вне хоста. */
+  viewerUrl?: string;
+}
+
+export type Attachment = KeyImageAttachment | SlideAttachment;
 
 export interface UnreadItem {
   connector: string;
@@ -45,6 +64,7 @@ export interface UnreadItem {
 
 export type LinkOpen =
   | { kind: 'dicom'; studyUid: string; seriesUid: string; sopUid: string; frame: number; presentation?: KeyImageAttachment['presentation'] }
+  | { kind: 'slide'; slideId: string; stain: string; magnification: number; region: NonNullable<SlideAttachment['region']> }
   | { kind: 'record' | 'url'; url: string };
 
 /** Команды хоста → чат. */
@@ -56,6 +76,8 @@ export interface HostCommands {
   /** Токен доступа Matrix, полученный хостом (режим auth: token). */
   'auth.token': { accessToken: string };
   'unread.watch': { contexts: ChatContext[] };
+  /** Режим launcher: окно чата открыто или свёрнуто. Свёрнутый чат не отмечает сообщения прочитанными. */
+  'view.visible': { visible: boolean };
 }
 
 /** События чата → хост. */
@@ -65,6 +87,8 @@ export interface ChatEvents {
   'link.open': LinkOpen;
   'auth.required': Record<string, never>;
   'context.opened': { connector: string; caseId: string; roomId: string };
+  /** Пользователь свернул чат кнопкой в его заголовке (режим launcher). */
+  'view.minimize': Record<string, never>;
   error: { message: string };
 }
 

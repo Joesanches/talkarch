@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { EventType, MsgType, RoomType } from '@konsilium/protocol';
 import {
   FOLDERS,
+  firstUnreadIndex,
+  typingText,
   archivedLabel,
   attachmentProblem,
   formatSize,
@@ -233,5 +235,37 @@ describe('поиск по сообщениям', () => {
     expect(s).toContain('очаг 12 мм');
     expect(s.length).toBeLessThanOrEqual(60);
     expect(snippet('Коротко', ['коротко'])).toBe('Коротко');
+  });
+});
+
+describe('встраивание в ЛИС: «печатает…», непрочитанное, препарат', () => {
+  it('«печатает…» по-русски', () => {
+    expect(typingText([])).toBeNull();
+    expect(typingText(['Колесников Д. А.'])).toBe('Колесников Д. А. печатает…');
+    expect(typingText(['Смирнова А. В.', 'Ершова Т. Н.'])).toBe('Смирнова А. В. и Ершова Т. Н. печатают…');
+    expect(typingText(['А', 'Б', 'В'])).toBe('3 участника печатают…');
+  });
+
+  it('разделитель — перед первым чужим сообщением после отметки о прочтении', () => {
+    const me = '@smirnova:konsilium.test';
+    const other = '@kolesnikov:konsilium.test';
+    const items = [
+      item('$1', 'm.room.message', { body: 'a' }, other),
+      item('$2', 'm.room.message', { body: 'b' }, me),
+      item('$3', 'm.room.member', { membership: 'join' }, other),
+      item('$4', 'm.room.message', { body: 'c' }, other),
+      item('$5', 'm.room.message', { body: 'd' }, other),
+    ];
+    expect(firstUnreadIndex(items, me, '$2', 0)).toBe(3);
+    expect(firstUnreadIndex(items, me, '$5', 0)).toBeNull();
+    // Отметки нет в загруженной ленте — по числу непрочитанных с конца.
+    expect(firstUnreadIndex(items, me, '$старое', 2)).toBe(3);
+    expect(firstUnreadIndex(items, me, null, 0)).toBeNull();
+  });
+
+  it('препарат в цитате и в списке чатов', () => {
+    const slide = item('$s', 'm.room.message', { msgtype: MsgType.SlideRoi, body: 'Стекло 2, блок 1Б: H&E' });
+    expect(quoteText(slide)).toBe('Препарат: Стекло 2, блок 1Б: H&E');
+    expect(preview(slide, 'Смирнова А. В.', false)).toBe('Смирнова: Препарат: Стекло 2, блок 1Б: H&E');
   });
 });

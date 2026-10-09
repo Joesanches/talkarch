@@ -178,7 +178,9 @@ export function preview(e: TimelineItem | undefined, senderName: string, isMine:
   if (e.type !== 'm.room.message') return '';
   const first = String(e.content.body ?? '').split('\n')[0] ?? '';
   if (e.content.msgtype === 'm.notice') return first;
-  const body = e.content.msgtype === 'm.image' ? `Изображение: ${first}` : e.content.msgtype === 'm.file' ? `Файл: ${first}` : stripReplyFallback(String(e.content.body ?? '')).split('\n')[0];
+  const label: Record<string, string> = { 'm.image': 'Изображение', 'm.file': 'Файл', [MsgType.SlideRoi]: 'Препарат', [MsgType.KeyImage]: 'Ключевой снимок' };
+  const kind = label[String(e.content.msgtype)];
+  const body = kind ? `${kind}: ${first}` : stripReplyFallback(String(e.content.body ?? '')).split('\n')[0];
   return `${isMine ? 'Вы' : senderName.split(' ')[0]}: ${body}`;
 }
 
@@ -380,6 +382,10 @@ export function quoteText(e: TimelineItem | undefined): string {
       return `Изображение: ${body}`;
     case 'm.file':
       return `Файл: ${body}`;
+    case MsgType.SlideRoi:
+      return `Препарат: ${body}`;
+    case MsgType.KeyImage:
+      return `Ключевой снимок: ${body}`;
     case MsgType.Critical:
       return preview(e, '', false);
     default:
@@ -434,4 +440,32 @@ export function snippet(text: string, terms: string[], width = 120): string {
   const start = Math.max(0, at - Math.floor(width / 3));
   const end = Math.min(flat.length, start + width - 2);
   return `…${flat.slice(start, end)}${end < flat.length ? '…' : ''}`;
+}
+
+/** «Колесников Д. А. печатает…», «Смирнова А. В. и Ершова Т. Н. печатают…», «3 участника печатают…». */
+export function typingText(names: string[]): string | null {
+  if (!names.length) return null;
+  if (names.length === 1) return `${names[0]} печатает…`;
+  if (names.length === 2) return `${names[0]} и ${names[1]} печатают…`;
+  return `${names.length} участника печатают…`;
+}
+
+/**
+ * Где поставить разделитель «Непрочитанные сообщения»: перед первым чужим сообщением после отметки о прочтении.
+ * Отметки нет в загруженной ленте — по счётчику непрочитанного с конца. `null` — разделитель не нужен.
+ */
+export function firstUnreadIndex(items: TimelineItem[], me: string, readUpTo: string | null, unreadCount: number): number | null {
+  const isUnreadCandidate = (e: TimelineItem) => e.type === 'm.room.message' && e.sender !== me;
+  const at = readUpTo ? items.findIndex((e) => e.eventId === readUpTo) : -1;
+  if (at >= 0) {
+    const i = items.findIndex((e, k) => k > at && isUnreadCandidate(e));
+    return i >= 0 ? i : null;
+  }
+  if (unreadCount <= 0) return null;
+  let left = unreadCount;
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (!isUnreadCandidate(items[i]!)) continue;
+    if (--left === 0) return i;
+  }
+  return null;
 }

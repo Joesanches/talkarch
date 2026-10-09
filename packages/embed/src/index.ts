@@ -97,12 +97,18 @@ function mountLauncher(frame: HTMLIFrameElement, o: CreateChatOptions) {
   const button = root.querySelector('button')!;
   const popup = root.querySelector('.popup')!;
   const badge = root.querySelector('.badge')!;
-  button.addEventListener('click', () => {
-    const open = popup.classList.toggle('open');
+  const listeners = new Set<(open: boolean) => void>();
+  const setOpen = (open: boolean) => {
+    popup.classList.toggle('open', open);
     button.setAttribute('aria-expanded', String(open));
-  });
+    listeners.forEach((cb) => cb(open));
+  };
+  button.addEventListener('click', () => setOpen(!popup.classList.contains('open')));
   return {
     element: host,
+    setOpen,
+    isOpen: () => popup.classList.contains('open'),
+    onToggle: (cb: (open: boolean) => void) => listeners.add(cb),
     setBadge(n: number) {
       badge.textContent = n > 99 ? '99+' : String(n);
       badge.classList.toggle('on', n > 0);
@@ -157,6 +163,8 @@ export function createChat(options: CreateChatOptions): Promise<ChatHandle> {
     }
     if (msg.type === 'ready') {
       markReady();
+      // Свёрнутое окно launcher: чат не должен отмечать сообщения прочитанными, пока его не откроют.
+      if (launcher) void post('view.visible', { visible: launcher.isOpen() });
       if (options.auth?.kind === 'token') void Promise.resolve(options.auth.getToken()).then((t) => post('auth.token', { accessToken: t }));
       if (watched) void post('unread.watch', { contexts: [...watched].map((k) => ({ connector: k.split(':')[0]!, caseId: k.slice(k.indexOf(':') + 1) })) });
     }
@@ -164,9 +172,11 @@ export function createChat(options: CreateChatOptions): Promise<ChatHandle> {
       void Promise.resolve(options.auth.getToken()).then((t) => post('auth.token', { accessToken: t }));
     }
     if (msg.type === 'unread.changed') launcher?.setBadge((msg.payload as ChatEvents['unread.changed']).total);
+    if (msg.type === 'view.minimize') launcher?.setOpen(false);
     emit(msg.type, msg.payload);
   }
   window.addEventListener('message', onMessage);
+  launcher?.onToggle((visible) => void post('view.visible', { visible }).catch(() => undefined));
 
   async function post<K extends keyof HostCommands>(type: K, payload: HostCommands[K]): Promise<void> {
     await ready;
@@ -186,7 +196,10 @@ export function createChat(options: CreateChatOptions): Promise<ChatHandle> {
     frame,
     setContext: (context) => post('context.set', context),
     attach: (attachment) => post('compose.attach', attachment),
-    open: (o = {}) => post('room.open', o),
+    open: (o = {}) => {
+      launcher?.setOpen(true);
+      return post('room.open', o);
+    },
     setTheme: (theme) => post('theme.set', theme),
     watchUnread(contexts, callback) {
       watched = new Set(contexts.filter((c) => c.connector).map((c) => contextKey(c.connector!, c.caseId)));

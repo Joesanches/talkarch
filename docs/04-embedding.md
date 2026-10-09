@@ -18,7 +18,11 @@
 
 Все режимы — один и тот же веб-клиент, поэтому поведение и дизайн одинаковы везде.
 
-> **Статус PoC (08.10.2026).** Работают режимы `panel`, `launcher` и `headless`, функция `createChat()`, элемент `<konsilium-chat>` и протокол v1 (`packages/embed/src/protocol.ts`). Режим `full` — обычный веб-клиент по ссылке `/c/{подключение}/{номер}`. Живой пример — демо-РИС в песочнице: `http://localhost:8090/demo/ris` в окружении разработчика, `https://<стенд>/sandbox/ris` на стенде. В нём рабочий список с бейджами, вьюер с кнопкой «В чат исследования» и панель чата. Вход: в PoC — во фрейме или токеном от хоста (`auth.token`); единый вход через Keycloak (`oidc-silent`) — после подключения Keycloak.
+> **Статус PoC (08.10.2026).** Работают режимы `panel`, `launcher` и `headless`, функция `createChat()`, элемент `<konsilium-chat>` и протокол v1 (`packages/embed/src/protocol.ts`). Режим `full` — обычный веб-клиент по ссылке `/c/{подключение}/{номер}`. Живые примеры в песочнице (`http://localhost:8090/demo/…` в окружении разработчика, `https://<стенд>/sandbox/…` на стенде):
+>
+> - **демо-РИС** (`ris`) — рабочий список с бейджами, вьюер с кнопкой «В чат исследования» и панель чата (`panel`);
+> - **демо-ЛИС** (`lis`) — форма случая патоморфологии с плавающим чатом (`launcher`) и кнопкой «В чат» у стекла: препарат уходит в чат карточкой с миниатюрой, «Открыть во вьюере» в чате открывает стекло в ЛИС. На кнопке — бейдж непрочитанного; пока окно свёрнуто, чат не отмечает сообщения прочитанными, а при открытии показывает разделитель «Непрочитанные сообщения».
+> Вход: в PoC — во фрейме или токеном от хоста (`auth.token`); единый вход через Keycloak (`oidc-silent`) — после подключения Keycloak.
 
 ## 2. Подключение
 
@@ -60,7 +64,13 @@ await chat.attach({                                                  // кноп
   annotations,
   caption: 'Дефекты наполнения в правой и левой ЛА',
 });
-await chat.open({ room: 'case', focus: 'composer' });
+await chat.attach({                                                  // кнопка «В чат» у стекла в ЛИС
+  kind: 'slide_roi',
+  slideId: '2', block: '1Б', stain: 'H&E', magnification: 20,
+  region: { x: 13824, y: 8400, w: 2048, h: 2048, level: 0 },          // без области — всё стекло
+  thumbnail: 'data:image/png;base64,…',
+});
+await chat.open({ room: 'case', focus: 'composer' });                // в режиме launcher — и открыть окно
 
 // Чат → хост
 chat.on('ready', () => {});
@@ -68,7 +78,7 @@ chat.on('unread', ({ total, byContext }) => worklist.setChatBadges(byContext));
 chat.on('critical', ({ context, state }) => worklist.markCritical(context, state));
 chat.on('open-link', (link) => {
   if (link.kind === 'dicom') viewer.open(link.studyUid, link.seriesUid, link.sopUid, link.presentation);
-  if (link.kind === 'slide') wsiViewer.open(link.slideId, link.region);
+  if (link.kind === 'slide') wsiViewer.open(link.slideId, link.region);       // стекло: stain, magnification, region
   if (link.kind === 'record') host.navigate(link.url);
 });
 chat.on('auth-required', () => host.reauthenticate());
@@ -99,15 +109,17 @@ const stop = counters.watchUnread(
 | Направление | `type` | Назначение | PoC |
 |---|---|---|---|
 | хост → чат | `context.set` | Сменить контекст (исследование, случай) | ✓ |
-| хост → чат | `compose.attach` | Прикрепить ключевой снимок (миниатюра, кадр, окно); ROI и файлы — далее | ✓ снимок |
+| хост → чат | `compose.attach` | Прикрепить ключевой снимок (`key_image`: миниатюра, кадр, окно) или препарат (`slide_roi`: стекло, блок, окраска, увеличение, область, миниатюра) | ✓ |
 | хост → чат | `room.open` | Поставить курсор в поле ввода | ✓ |
 | хост → чат | `theme.set` | Передать цвет бренда; остальные оттенки чат вычисляет сам | ✓ |
 | хост → чат | `auth.token` | Передать токен (режим `token`) | ✓ |
 | хост → чат | `unread.watch` | Какие контексты считать (строки рабочего списка) | ✓ |
+| хост → чат | `view.visible` | Окно `launcher` открыто или свёрнуто (SDK шлёт сам); свёрнутый чат не отмечает сообщения прочитанными | ✓ |
 | чат → хост | `ready` | Виджет готов | ✓ |
 | чат → хост | `context.opened` | Чат случая открыт | ✓ |
 | чат → хост | `unread.changed` | Счётчики по контекстам; новые приглашения — отдельным признаком; `critical` — сколько критических находок ждут подтверждения пользователя (хост показывает красный «!») | ✓ |
-| чат → хост | `link.open` | Открыть исследование (`dicom`: серия, кадр, окно), запись или ссылку в хосте | ✓ |
+| чат → хост | `link.open` | Открыть исследование (`dicom`: серия, кадр, окно), стекло (`slide`: окраска, увеличение, область), запись или ссылку в хосте | ✓ |
+| чат → хост | `view.minimize` | Пользователь свернул окно кнопкой в заголовке чата (`launcher`; SDK закрывает окно сам) | ✓ |
 | чат → хост | `auth.required` | Нужен вход | ✓ |
 | чат → хост | `critical.changed` | Статусы критических находок | план |
 | чат → хост | `resize` | Желаемая высота (`launcher`) | план |

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { ClientEvent, NotificationCountType, SyncState, type MatrixClient, type Room } from 'matrix-js-sdk';
+import { ClientEvent, SyncState, type MatrixClient, type Room } from 'matrix-js-sdk';
 import type { ArchivedCase } from '@konsilium/protocol';
 import { FOLDERS, criticalWaitingFor, foldersOf, initials, avatarColor, type Folder } from '../model.ts';
-import { CcsError, directRoomIds, openCase, removedToArchive, roomCriticals, startClient, useClientUpdates, useSyncState, type Session } from '../matrix.ts';
+import { CcsError, directRoomIds, openCase, removedToArchive, roomCriticals, startClient, unreadCount, useClientUpdates, useSyncState, type Session } from '../matrix.ts';
 import { focusRooms } from '../sync.ts';
 import { ArchiveList } from './ArchiveList.tsx';
 import { ChatList } from './ChatList.tsx';
@@ -71,7 +71,7 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
   const waits = (r: Room) => (criticalWaitingFor(roomCriticals(r), session.userId).length > 0 ? 1 : 0);
   rooms.sort((a, b) => waits(b) - waits(a));
   const folderOf = (r: Room) => foldersOf({ roomType: r.getType(), isDirect: direct.has(r.roomId) });
-  const unread = (r: Room) => (r.getMyMembership() === 'invite' ? 1 : r.getUnreadNotificationCount(NotificationCountType.Total));
+  const unread = (r: Room) => (r.getMyMembership() === 'invite' ? 1 : unreadCount(r));
   const counts = new Map<Folder, number>();
   for (const r of rooms) for (const f of folderOf(r)) counts.set(f, (counts.get(f) ?? 0) + unread(r));
 
