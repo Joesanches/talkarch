@@ -13,9 +13,9 @@
  *   E. архив: закрытые случаи уходят в архив (участники выводятся), участники возвращаются в архивный чат по требованию.
  * Сервис контекста тест запускает сам — с отдельной базой и подключением `load` (уровень 1).
  */
-import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, execFileSync, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { CLIENT_FILTER, Hs, SLIDING_LIST } from './hs.ts';
@@ -56,17 +56,50 @@ const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 
 
 // ── Ресурсы ──────────────────────────────────────────────────────────────────
 
-/** Процессор и память сервера (Synapse с воркерами, если есть, или Tuwunel) и PostgreSQL стенда. */
-function dockerStats(): Record<string, string> {
+/** Контейнеры стенда: сервер (Synapse с воркерами, если есть, или Tuwunel), PostgreSQL, Valkey. */
+function standContainers(): string[] {
   try {
     const project = SYNAPSE_CONTAINER.replace(/-synapse-1$/, '');
     const names = execFileSync('docker', ['ps', '--format', '{{.Names}}', '--filter', `name=^${project}-(synapse|tuwunel|postgres|valkey)`], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
-    const out = execFileSync('docker', ['stats', '--no-stream', '--format', '{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}', ...(names.length ? names : [SYNAPSE_CONTAINER, PG_CONTAINER])], { encoding: 'utf8' });
-    return Object.fromEntries(out.trim().split('\n').map((l) => { const [n, cpu, mem] = l.split('\t'); return [n!.replace(/^konsilium-load-|-1$/g, ''), `${cpu} · ${mem?.split(' / ')[0]}`]; }));
+    return names.length ? names : [SYNAPSE_CONTAINER, PG_CONTAINER];
+  } catch {
+    return [];
+  }
+}
+const shortName = (container: string) => container.replace(/^konsilium-load-|-1$/g, '');
+
+/** Мгновенный снимок процессора и памяти (docker stats). Процессор Tuwunel docker stats показывает нулём — см. containerCpu. */
+function dockerStats(): Record<string, string> {
+  try {
+    const out = execFileSync('docker', ['stats', '--no-stream', '--format', '{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}', ...standContainers()], { encoding: 'utf8' });
+    return Object.fromEntries(out.trim().split('\n').map((l) => { const [n, cpu, mem] = l.split('\t'); return [shortName(n!), `${cpu} · ${mem?.split(' / ')[0]}`]; }));
   } catch {
     return {};
   }
 }
+
+/** Процессорное время контейнеров стенда из cgroup (v1 или v2), с: по разнице — средняя загрузка за шаг. */
+function containerCpu(): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const name of standContainers()) {
+    try {
+      const id = execFileSync('docker', ['inspect', '--format', '{{.Id}}', name], { encoding: 'utf8' }).trim();
+      const v1 = `/sys/fs/cgroup/cpuacct/docker/${id}/cpuacct.usage`;
+      const v2 = `/sys/fs/cgroup/system.slice/docker-${id}.scope/cpu.stat`;
+      if (existsSync(v1)) out[shortName(name)] = Number(readFileSync(v1, 'utf8')) / 1e9;
+      else if (existsSync(v2)) out[shortName(name)] = Number(/usage_usec (\d+)/.exec(readFileSync(v2, 'utf8'))?.[1]) / 1e6;
+    } catch {
+      /* контейнер остановлен */
+    }
+  }
+  return out;
+}
+
+/** Средняя загрузка процессора контейнерами между двумя замерами containerCpu, % одного ядра. */
+const cpuPct = (from: Record<string, number>, seconds: number) => {
+  const to = containerCpu();
+  return Object.fromEntries(Object.keys(to).map((k) => [k, Math.round(((to[k]! - (from[k] ?? 0)) / seconds) * 100)]));
+};
 
 /** Процессорное время процесса (утилита + система), с — для загрузки сервиса контекста за шаг. */
 function cpuSeconds(pid: number): number {
@@ -98,7 +131,8 @@ async function serverVersion(): Promise<string> {
 function volumeSize(volume: string): string {
   try {
     const dir = execFileSync('docker', ['volume', 'inspect', volume, '--format', '{{.Mountpoint}}'], { encoding: 'utf8' }).trim();
-    return execFileSync('du', ['-sh', dir], { encoding: 'utf8' }).split('\t')[0]!;
+    // RocksDB удаляет файлы при уплотнении прямо во время обхода — du завершается с ошибкой, но итог печатает.
+    return spawnSync('du', ['-sh', dir], { encoding: 'utf8' }).stdout.split('\t')[0] || '?';
   } catch {
     return '?';
   }
@@ -182,6 +216,8 @@ async function main() {
   log(`сервер: ${results.server}`);
   const ccs = await startCcs();
   const ccsPid = ccs.pid!;
+  const cpuRun0 = containerCpu();
+  const tRun0 = performance.now();
 
   // Пользователи.
   log(`пользователи: ${USERS} обычных, ${HEAVY} «тяжёлых»`);
@@ -235,6 +271,7 @@ async function main() {
   const createFirst = new Recorder();
   const createLast = new Recorder();
   const cpuA0 = cpuSeconds(ccsPid);
+  const contA0 = containerCpu();
   let statsA: Record<string, string> = {};
   const createChat = async (c: CaseRoom, rec: Recorder[]) => {
     const t0 = performance.now();
@@ -261,6 +298,7 @@ async function main() {
     first_10pct: createFirst.summary(),
     last_10pct: createLast.summary(),
     ccs_cpu_pct: Math.round(((cpuSeconds(ccsPid) - cpuA0) / elapsedA) * 100),
+    containers_cpu_pct: cpuPct(contA0, elapsedA),
     containers_mid: statsA,
   };
 
@@ -270,6 +308,7 @@ async function main() {
   const burstFirst = new Recorder();
   const burstLast = new Recorder();
   const t3 = performance.now();
+  const contB0 = containerCpu();
   let statsB: Record<string, string> = {};
   const offeredS = await paced(BURST, BURST_RATE, async (i) => {
     if (i === Math.floor(BURST / 2)) statsB = dockerStats();
@@ -283,6 +322,7 @@ async function main() {
     all: burst.summary(),
     first_10pct: burstFirst.summary(),
     last_10pct: burstLast.summary(),
+    containers_cpu_pct: cpuPct(contB0, (performance.now() - t3) / 1000),
     containers_mid: statsB,
   };
 
@@ -409,6 +449,7 @@ async function main() {
     log(`C${step + 1}: ${rate} сообщений/с, ${STEP_S} с`);
     const send = new Recorder();
     const cpu0 = cpuSeconds(ccsPid);
+    const cont0 = containerCpu();
     let mid: Record<string, string> = {};
     const elapsed = await paced(count, rate, async (i) => {
       if (i === Math.floor(count / 2)) mid = dockerStats();
@@ -434,6 +475,7 @@ async function main() {
       delivery: delivery[step]!.summary(),
       delivered_pct: Math.round((deliveredCount[step]! / expected) * 1000) / 10,
       ccs_cpu_pct: Math.round(((cpuSeconds(ccsPid) - cpu0) / (elapsed + 5)) * 100),
+      containers_cpu_pct: cpuPct(cont0, elapsed + 5),
       containers_mid: mid,
     });
   }
@@ -550,6 +592,7 @@ async function main() {
         events: psql('select count(*) from events'),
         users: psql('select count(*) from users'),
       };
+  results.containers_cpu_run = { duration_s: Math.round((performance.now() - tRun0) / 1000), avg_pct: cpuPct(cpuRun0, (performance.now() - tRun0) / 1000) };
   results.finished_at = new Date().toISOString();
   ccs.kill('SIGTERM');
   mkdirSync(resolve(OUT, '..'), { recursive: true });

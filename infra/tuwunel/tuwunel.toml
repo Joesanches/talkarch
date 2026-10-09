@@ -24,7 +24,8 @@ appservice_dir = "/etc/tuwunel/appservices"
 log = "warn"
 
 # Единый вход: Keycloak окружения разработчика (infra/keycloak), клиент тот же, что у Synapse. Браузер ходит
-# на localhost:8180, сервер — на keycloak:8080, поэтому адреса заданы явно, без discovery.
+# на localhost:8180, сервер — на keycloak:8080: discovery по внутреннему адресу, Keycloak (KC_HOSTNAME_BACKCHANNEL_DYNAMIC)
+# отдаёт серверу внутренние адреса токена и userinfo, а адрес входа для браузера — localhost:8180.
 [[global.identity_provider]]
 brand = "keycloak"
 name = "учётную запись организации"
@@ -32,10 +33,7 @@ client_id = "synapse"
 client_secret = "dev-only-oidc-client-secret-0123456789"
 issuer_url = "http://localhost:8180/realms/konsilium"
 callback_url = "http://localhost:8008/_matrix/client/unstable/login/sso/callback/synapse"
-discovery = false
-authorization_url = "http://localhost:8180/realms/konsilium/protocol/openid-connect/auth"
-token_url = "http://keycloak:8080/realms/konsilium/protocol/openid-connect/token"
-userinfo_url = "http://keycloak:8080/realms/konsilium/protocol/openid-connect/userinfo"
+discovery_url = "http://keycloak:8080/realms/konsilium/.well-known/openid-configuration"
 scope = ["openid", "profile"]
 # Логин Keycloak = логин Matrix; свой Keycloak — доверенный: вход в уже заведённую учётную запись,
 # как allow_existing_users у Synapse.

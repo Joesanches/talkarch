@@ -49,6 +49,8 @@ async function ensureUser(localpart: string): Promise<string> {
   return login.json.access_token;
 }
 
+const isTuwunel = async () => (await fetch(`${HS}/_tuwunel/server_version`).catch(() => null))?.ok === true;
+
 async function api(token: string | null, path: string, body: unknown) {
   const res = await fetch(`${CCS}${path}`, {
     method: 'POST',
@@ -345,8 +347,9 @@ describe('Чат случая на сервере Matrix с песочницей
           body: JSON.stringify({ lists: { all: { ranges: [[0, 199]], timeline_limit: 1, required_state: [[EventType.CaseArchive, '']] } } }),
         }).then((r) => r.json() as Promise<any>)
       ).rooms as Record<string, { required_state?: Array<{ type: string; content: { status?: string } }> }>;
+    // Tuwunel в новом соединении комнату, из которой вывели, не отдаёт вовсе (docs/11-load-test.md, раздел 7).
     const before = (await sss(tok.melnikova!))[archRoom];
-    expect(before?.required_state?.find((e) => e.type === EventType.CaseArchive)?.content.status).toBe('archived');
+    if (before || !(await isTuwunel())) expect(before?.required_state?.find((e) => e.type === EventType.CaseArchive)?.content.status).toBe('archived');
     expect((await cs(tok.melnikova!, 'POST', `/rooms/${enc(archRoom)}/forget`, {})).status).toBe(200);
     // С воркерами «забыл» доходит до воркера синхронизации репликацией — с небольшой задержкой.
     await waitFor(async () => (Object.keys(await sss(tok.melnikova!)).includes(archRoom) ? undefined : true));

@@ -44,7 +44,7 @@ Tuwunel (Apache-2.0) вместо Synapse (`infra/docker-compose.tuwunel.yml`, �
 
 ```bash
 F="-p konsilium-load -f infra/docker-compose.yml -f infra/docker-compose.tuwunel.yml -f tools/load/docker-compose.load.yml -f tools/load/docker-compose.load-tuwunel.yml"
-docker compose $F up -d tuwunel
+docker compose $F up -d postgres tuwunel
 SYNC_MODE=sliding pnpm --filter @konsilium/load load
 docker compose $F down -v
 ```
