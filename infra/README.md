@@ -136,7 +136,7 @@ docker compose up -d --remove-orphans                                       # о
 
 ## Tuwunel вместо Synapse
 
-Для сравнения серверов ([docs/11-load-test.md, раздел 7](../docs/11-load-test.md#7-tuwunel-против-synapse-прогон-7)) окружение поднимается на [Tuwunel](https://github.com/matrix-construct/tuwunel) (Rust, Apache-2.0) — тот же порт 8008, та же регистрация сервиса контекста и тот же Keycloak:
+Для сравнения серверов ([docs/11-load-test.md, раздел 7](../docs/11-load-test.md#7-tuwunel-против-synapse-прогоны-7-и-8)) окружение поднимается на [Tuwunel](https://github.com/matrix-construct/tuwunel) (Rust, Apache-2.0) — тот же порт 8008, та же регистрация сервиса контекста и тот же Keycloak:
 
 ```bash
 cd infra

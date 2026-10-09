@@ -70,7 +70,7 @@
 - Synapse — AGPL-3.0 с версии 1.99.0 (январь 2024), коммерческая лицензия — у Element. Последний релиз — 1.162.0 от 29.09.2026 ([README](https://github.com/element-hq/synapse), [CHANGES-2024](https://github.com/element-hq/synapse/blob/develop/docs/changelogs/CHANGES-2024.md)).
 - SDK [matrix-js-sdk](https://github.com/matrix-org/matrix-js-sdk) и [matrix-rust-sdk](https://github.com/matrix-org/matrix-rust-sdk) — Apache-2.0.
 - [Element Web](https://github.com/element-hq/element-web) и Element X ([Android](https://github.com/element-hq/element-x-android), [iOS](https://github.com/element-hq/element-x-ios)) — AGPL-3.0 или коммерческая. **Форкать их под проприетарный продукт нельзя**; собственный клиент пишется на SDK.
-- [Tuwunel](https://github.com/matrix-construct/tuwunel) — сервер на Rust под Apache-2.0, преемник conduwuit; v1.9.3 от 25.09.2026. По README спонсируется правительством Швейцарии. Зрелость для крупных инсталляций нужно проверить в PoC.
+- [Tuwunel](https://github.com/matrix-construct/tuwunel) — сервер на Rust под Apache-2.0, преемник conduwuit; v1.9.3 от 25.09.2026. По README спонсируется правительством Швейцарии. В PoC проверен ([11-load-test.md, раздел 7](11-load-test.md#7-tuwunel-против-synapse-прогоны-7-и-8)): на той же машине быстрее Synapse в десятки раз, сервис контекста работает без изменений; расхождения в Sliding Sync, запись без fsync, переноса данных из Synapse нет.
 - Dart SDK (famedly) и FluffyChat — AGPL-3.0 ([pub.dev](https://pub.dev/packages/matrix), [FluffyChat](https://github.com/krille-chan/fluffychat)). Поэтому Flutter-клиент «из коробки» не подходит.
 
 **Что даёт протокол**

@@ -49,6 +49,8 @@ SYNC_MODE=sliding pnpm --filter @konsilium/load load
 docker compose $F down -v
 ```
 
+Пробы совместимости и надёжности (`probes/`, запуск — `node tools/load/probes/<проба>.mjs http://localhost:18008 dev-only-registration-shared-secret`; регистрация по токену, как у Tuwunel): `sliding-sync-join.mjs` и `sliding-sync-leave.mjs` — данные комнаты после входа, новой подписки и вывода; `send.mjs` — отправка подряд (под `strace -f -c -e trace=fsync,fdatasync -p <pid>`); `crash.mjs` — сохранность после `docker kill -s KILL`. Результаты — [docs/11-load-test.md, 7.4–7.5](../../docs/11-load-test.md#74-совместимость).
+
 Параметры — переменные окружения (по умолчанию в скобках): `USERS` (300), `ROOMS_PER_USER` (20), `CREATE_RATE` (2.5), `BURST` (300), `BURST_RATE` (5), `HEAVY_USERS` (5), `HEAVY_ROOMS` (200), `INTEGRATION_EVENTS` (1000), `MSG_RATES` (`2,10,30`), `STEP_S` (60), `ARCHIVE_ROOMS` (100), `SYNC_MODE` (`classic` или `sliding`), `HS_URL` (`http://localhost:18008`).
 
 Генератор нагрузки, сервис контекста и Synapse работают на одной машине и делят процессор — цифры получаются пессимистичными. Для решения о сайзинге повторите прогон на целевом железе с конфигурацией Synapse с воркерами ([docs/11-load-test.md](../../docs/11-load-test.md), «Что дальше»).
