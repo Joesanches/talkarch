@@ -12,6 +12,8 @@ export const config = {
   fromFile: false,
   /** `false` — обычная синхронизация даже там, где сервер поддерживает Sliding Sync. */
   slidingSync: true as boolean,
+  /** Уведомления браузера: `none` — без названия чата, отправителя и текста (по умолчанию); `full` — с ними. */
+  notificationPreview: 'none' as 'none' | 'full',
 };
 
 /** Прочитать /config.json, если он есть. Ошибки не мешают запуску — остаются значения по умолчанию. */
@@ -19,11 +21,12 @@ export async function loadRuntimeConfig(): Promise<void> {
   try {
     const res = await fetch('/config.json', { cache: 'no-store' });
     if (!res.ok || !res.headers.get('content-type')?.includes('json')) return;
-    const json = (await res.json()) as { hsUrl?: unknown; ccsUrl?: unknown; embedOrigins?: unknown; slidingSync?: unknown };
+    const json = (await res.json()) as { hsUrl?: unknown; ccsUrl?: unknown; embedOrigins?: unknown; slidingSync?: unknown; notificationPreview?: unknown };
     if (typeof json.hsUrl === 'string') config.hsUrl = json.hsUrl.replace(/\/$/, '');
     if (typeof json.ccsUrl === 'string') config.ccsUrl = json.ccsUrl.replace(/\/$/, '');
     if (Array.isArray(json.embedOrigins)) config.embedOrigins = json.embedOrigins.filter((o): o is string => typeof o === 'string');
     if (json.slidingSync === false) config.slidingSync = false;
+    if (json.notificationPreview === 'full') config.notificationPreview = 'full';
     config.fromFile = true;
   } catch {
     /* нет файла — окружение разработчика */

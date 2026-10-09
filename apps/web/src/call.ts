@@ -1,5 +1,6 @@
 import type { MatrixClient, Room as MatrixRoom } from 'matrix-js-sdk';
 import { CallState, EventType } from '@konsilium/protocol';
+import type { CallInviteContent } from '@konsilium/protocol/push';
 import { config } from './config.ts';
 import { CcsError, type Session } from './matrix.ts';
 
@@ -47,11 +48,19 @@ export function activeCall(room: MatrixRoom): CallState | null {
   return Date.now() - Date.parse(parsed.data.started_at) < 12 * 3600_000 ? parsed.data : null;
 }
 
-/** Отметить начало звонка в комнате — участники увидят «Идёт звонок · Присоединиться». */
+/** Сколько вызов актуален: позже уведомление «Входящий звонок» уже не показывается. */
+export const CALL_INVITE_LIFETIME_MS = 60_000;
+
+/**
+ * Отметить начало звонка в комнате — участники увидят «Идёт звонок · Присоединиться». Вызов `ru.vendor.call.invite` в
+ * ленте — для уведомлений «Входящий звонок» (push и браузер): по состоянию звонка начало не отличить от конца.
+ */
 export async function markCallStarted(client: MatrixClient, room: MatrixRoom, kind: CallState['kind']) {
   if (activeCall(room)) return;
   const content: CallState = { call_id: CALL_ID, kind, started_by: client.getUserId()!, started_at: new Date().toISOString() };
   await client.sendStateEvent(room.roomId, EventType.Call as never, content as never, CALL_ID);
+  const invite: CallInviteContent = { call_id: CALL_ID, kind, lifetime: CALL_INVITE_LIFETIME_MS };
+  await client.sendEvent(room.roomId, EventType.CallInvite as never, invite as never).catch(() => undefined);
 }
 
 /** Отметить конец звонка — вызывает последний вышедший. */

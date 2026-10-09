@@ -364,6 +364,21 @@ button:disabled {
   background: transparent;
   font-size: 18px;
 }
+.notify-prompt {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
+}
+.notify-prompt span {
+  flex: 1;
+}
+.banner .notify-allow {
+  background: var(--color-accent);
+  color: #fff;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
 .chat-header {
   display: flex;
   align-items: center;

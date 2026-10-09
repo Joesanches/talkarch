@@ -3,12 +3,15 @@ import { ClientEvent, SyncState, type MatrixClient, type Room } from 'matrix-js-
 import type { ArchivedCase } from '@konsilium/protocol';
 import { FOLDERS, criticalWaitingFor, foldersOf, initials, avatarColor, type Folder } from '../model.ts';
 import { CcsError, directRoomIds, openCase, removedToArchive, roomCriticals, startClient, unreadCount, useClientUpdates, useSyncState, type Session } from '../matrix.ts';
+import { config } from '../config.ts';
+import { installNotifications } from '../notifications.ts';
 import { focusRooms } from '../sync.ts';
 import { ArchiveList } from './ArchiveList.tsx';
 import { ChatList } from './ChatList.tsx';
 import { CallPanel } from './CallPanel.tsx';
 import { ChatView } from './ChatView.tsx';
 import { Icon } from './Icon.tsx';
+import { NotificationsPrompt } from './NotificationsPrompt.tsx';
 
 export function Messenger({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [client, setClient] = useState<MatrixClient | null>(null);
@@ -94,6 +97,24 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
       client.off(ClientEvent.Sync, onSync);
     };
   }, [client, session.userId]);
+  // Уведомления браузера, пока вкладка открыта: щелчок открывает чат.
+  useEffect(
+    () =>
+      installNotifications(client, {
+        me: session.userId,
+        preview: config.notificationPreview,
+        attending: () => document.visibilityState === 'visible' && document.hasFocus(),
+        selected: () => selectedRef.current,
+        // Приглашённый эскалацией сначала входит в чат — как при выборе в списке.
+        open: (roomId) => {
+          setFolder('all');
+          const room = client.getRoom(roomId);
+          if (room) void select(room);
+          else setSelected(roomId);
+        },
+      }),
+    [client, session.userId],
+  );
   const me = client.getUser(session.userId);
   const myName = me?.displayName ?? session.userId;
 
@@ -173,6 +194,7 @@ function Shell({ client, session, onLogout }: { client: MatrixClient; session: S
             onLeave={() => setCall(null)}
           />
         )}
+        <NotificationsPrompt />
         {banner && (
           <div className="banner" role="status">
             {banner}
