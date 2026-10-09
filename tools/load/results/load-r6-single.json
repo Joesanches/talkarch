@@ -1,0 +1,364 @@
+{
+  "run": "r6s",
+  "started_at": "2026-10-09T00:05:31.419Z",
+  "params": {
+    "USERS": 240,
+    "ROOMS_PER_USER": 20,
+    "CREATE_RATE": 2.5,
+    "BURST": 300,
+    "BURST_RATE": 5,
+    "HEAVY": 5,
+    "HEAVY_ROOMS": 200,
+    "EVENTS": 1000,
+    "MSG_RATES": [
+      2,
+      10,
+      30
+    ],
+    "STEP_S": 60,
+    "SYNC_MODE": "sliding",
+    "ARCHIVE_ROOMS": 100
+  },
+  "users": {
+    "registration": {
+      "n": 245,
+      "errors": 0,
+      "p50": 370,
+      "p95": 426,
+      "p99": 452,
+      "max": 463,
+      "mean": 377
+    }
+  },
+  "A1_case_snapshots": {
+    "batch_of_100": {
+      "n": 19,
+      "errors": 0,
+      "p50": 325,
+      "p95": 394,
+      "p99": 394,
+      "max": 394,
+      "mean": 329
+    },
+    "events_per_s": 304
+  },
+  "A2_chat_creation_paced": {
+    "rate_per_s": 2.5,
+    "duration_s": 641,
+    "all": {
+      "n": 1600,
+      "errors": 0,
+      "p50": 1295,
+      "p95": 2214,
+      "p99": 3075,
+      "max": 3711,
+      "mean": 1330
+    },
+    "first_10pct": {
+      "n": 160,
+      "errors": 0,
+      "p50": 1461,
+      "p95": 1840,
+      "p99": 1879,
+      "max": 1918,
+      "mean": 1468
+    },
+    "last_10pct": {
+      "n": 160,
+      "errors": 0,
+      "p50": 790,
+      "p95": 1210,
+      "p99": 1823,
+      "max": 2000,
+      "mean": 869
+    },
+    "ccs_cpu_pct": 3,
+    "containers_mid": {
+      "synapse": "3.05% · 201.8MiB",
+      "postgres": "47.89% · 204.7MiB"
+    }
+  },
+  "A3_chat_creation_peak": {
+    "offered_rate_per_s": 5,
+    "achieved_rooms_per_s": 3.6,
+    "offered_s": 83,
+    "all": {
+      "n": 300,
+      "errors": 0,
+      "p50": 21237,
+      "p95": 27260,
+      "p99": 27445,
+      "max": 27520,
+      "mean": 19722
+    },
+    "first_10pct": {
+      "n": 30,
+      "errors": 0,
+      "p50": 5039,
+      "p95": 7961,
+      "p99": 8237,
+      "max": 8237,
+      "mean": 5022
+    },
+    "last_10pct": {
+      "n": 30,
+      "errors": 0,
+      "p50": 25109,
+      "p95": 26574,
+      "p99": 26795,
+      "max": 26795,
+      "mean": 25046
+    },
+    "containers_mid": {
+      "synapse": "117.39% · 229.8MiB",
+      "postgres": "74.35% · 240.1MiB"
+    }
+  },
+  "joins": {
+    "n": 6700,
+    "errors": 0,
+    "p50": 852,
+    "p95": 1352,
+    "p99": 1510,
+    "max": 1897,
+    "mean": 858
+  },
+  "B1_notifications": {
+    "batch_of_50": {
+      "n": 20,
+      "errors": 0,
+      "p50": 1694,
+      "p95": 1823,
+      "p99": 1906,
+      "max": 1906,
+      "mean": 1725
+    },
+    "events_per_s": 29
+  },
+  "B2_case_updates": {
+    "batch_of_50": {
+      "n": 20,
+      "errors": 0,
+      "p50": 3912,
+      "p95": 4051,
+      "p99": 4409,
+      "max": 4409,
+      "mean": 3944
+    },
+    "events_per_s": 13
+  },
+  "C0_send_without_clients": {
+    "rate_per_s": 2,
+    "send": {
+      "n": 120,
+      "errors": 0,
+      "p50": 73,
+      "p95": 84,
+      "p99": 98,
+      "max": 107,
+      "mean": 74
+    }
+  },
+  "D1_cold_start_regular": {
+    "rooms_per_user": 20,
+    "one_by_one": {
+      "n": 20,
+      "errors": 0,
+      "p50": 262,
+      "p95": 281,
+      "p99": 293,
+      "max": 293,
+      "mean": 229
+    },
+    "all_at_once": {
+      "n": 240,
+      "errors": 0,
+      "p50": 36585,
+      "p95": 40565,
+      "p99": 40608,
+      "max": 40621,
+      "mean": 34229
+    }
+  },
+  "C_message_delivery": {
+    "clients": 240,
+    "steps": [
+      {
+        "rate_per_s": 2,
+        "duration_s": 60,
+        "send": {
+          "n": 120,
+          "errors": 0,
+          "p50": 76,
+          "p95": 95,
+          "p99": 299,
+          "max": 313,
+          "mean": 84
+        },
+        "delivery": {
+          "n": 240,
+          "errors": 0,
+          "p50": 107,
+          "p95": 199,
+          "p99": 431,
+          "max": 437,
+          "mean": 124
+        },
+        "delivered_pct": 100,
+        "ccs_cpu_pct": 0,
+        "containers_mid": {
+          "synapse": "3.11% · 403MiB",
+          "postgres": "3.26% · 335.3MiB"
+        }
+      },
+      {
+        "rate_per_s": 10,
+        "duration_s": 60,
+        "send": {
+          "n": 600,
+          "errors": 0,
+          "p50": 105,
+          "p95": 992,
+          "p99": 1502,
+          "max": 1653,
+          "mean": 230
+        },
+        "delivery": {
+          "n": 1200,
+          "errors": 0,
+          "p50": 147,
+          "p95": 1225,
+          "p99": 1812,
+          "max": 2205,
+          "mean": 304
+        },
+        "delivered_pct": 100,
+        "ccs_cpu_pct": 1,
+        "containers_mid": {
+          "synapse": "3.41% · 402.8MiB",
+          "postgres": "3.58% · 341.6MiB"
+        }
+      },
+      {
+        "rate_per_s": 30,
+        "duration_s": 98,
+        "send": {
+          "n": 1800,
+          "errors": 0,
+          "p50": 38928,
+          "p95": 43074,
+          "p99": 49721,
+          "max": 50887,
+          "mean": 31394
+        },
+        "delivery": {
+          "n": 3246,
+          "errors": 0,
+          "p50": 46589,
+          "p95": 63424,
+          "p99": 69156,
+          "max": 74495,
+          "mean": 40260
+        },
+        "delivered_pct": 90.2,
+        "ccs_cpu_pct": 0,
+        "containers_mid": {
+          "synapse": "116.80% · 403.6MiB",
+          "postgres": "70.92% · 346.4MiB"
+        }
+      }
+    ]
+  },
+  "D2_cold_start_heavy": {
+    "rooms_per_user": 200,
+    "initial_sync_first": {
+      "n": 5,
+      "errors": 0,
+      "p50": 5812,
+      "p95": 8290,
+      "p99": 8290,
+      "max": 8290,
+      "mean": 6282
+    },
+    "initial_sync_repeat_cached": {
+      "n": 10,
+      "errors": 0,
+      "p50": 124,
+      "p95": 140,
+      "p99": 140,
+      "max": 140,
+      "mean": 126
+    },
+    "sliding_sync_first_20": {
+      "n": 15,
+      "errors": 0,
+      "p50": 83,
+      "p95": 155,
+      "p99": 155,
+      "max": 155,
+      "mean": 98
+    }
+  },
+  "E1_archive": {
+    "rooms": 100,
+    "archived": 100,
+    "duration_s": 64.8,
+    "rooms_per_s": 1.5
+  },
+  "E2_archive_return": {
+    "one_by_one": {
+      "n": 50,
+      "errors": 0,
+      "p50": 346,
+      "p95": 591,
+      "p99": 627,
+      "max": 627,
+      "mean": 383
+    },
+    "all_at_once": {
+      "n": 50,
+      "errors": 0,
+      "p50": 4043,
+      "p95": 5725,
+      "p99": 5746,
+      "max": 5746,
+      "mean": 3939
+    },
+    "all_at_once_phases": {
+      "open_ccs": {
+        "n": 50,
+        "errors": 0,
+        "p50": 2480,
+        "p95": 4651,
+        "p99": 4976,
+        "max": 4976,
+        "mean": 2545
+      },
+      "join": {
+        "n": 50,
+        "errors": 0,
+        "p50": 1025,
+        "p95": 1124,
+        "p99": 1133,
+        "max": 1133,
+        "mean": 965
+      },
+      "history": {
+        "n": 50,
+        "errors": 0,
+        "p50": 458,
+        "p95": 519,
+        "p99": 558,
+        "max": 558,
+        "mean": 429
+      }
+    }
+  },
+  "database": {
+    "synapse_db": "262 MB",
+    "rooms": "1900",
+    "events": "38140",
+    "users": "245"
+  },
+  "finished_at": "2026-10-09T00:33:40.358Z"
+}

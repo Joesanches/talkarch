@@ -89,7 +89,9 @@ export function createHostMock(opts: HostMockOptions) {
   /** Журнал критических находок «системы-источника»: что пришло обратными вызовами (ключ идемпотентности → событие). */
   const criticalEvents = new Map<string, CriticalFindingEvent & { connector: string }>();
   const timers = new Set<NodeJS.Timeout>();
-  let requestSeq = 7780;
+  // Номера заявок не повторяются между перезапусками песочницы: сервис контекста помнит обработанные события 7 дней,
+  // и статусы «новой» заявки с прежним номером он отбросил бы как повтор.
+  let requestSeq = 10_000 + (Math.floor(Date.now() / 1000) % 90_000) * 10;
 
   const deliver: Deliver =
     opts.deliver ??

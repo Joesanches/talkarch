@@ -1,0 +1,43 @@
+# Synapse с воркерами — добавка к homeserver.yaml (второй файл конфигурации главного процесса и воркеров).
+# Схема из docs/03-architecture.md, 9.2, в миниатюре: главный процесс (API клиентов, Application Service, вход),
+# 2 воркера синхронизации (/sync и Simplified Sliding Sync) и 2 воркера записи событий (шардирование по комнатам).
+# Обмен между процессами — HTTP-репликация и Valkey (совместимая с Redis замена под BSD-3).
+
+# Список слушателей заменяет список из homeserver.yaml целиком: к API клиентов добавлена репликация (только внутри сети).
+listeners:
+  - port: 8008
+    type: http
+    tls: false
+    x_forwarded: true
+    bind_addresses: ["0.0.0.0"]
+    resources:
+      - names: [client]
+        compress: false
+  - port: 9093
+    type: http
+    tls: false
+    bind_addresses: ["0.0.0.0"]
+    resources:
+      - names: [replication]
+
+redis:
+  enabled: true
+  host: valkey
+  port: 6379
+
+instance_map:
+  main:
+    host: synapse
+    port: 9093
+  persister1:
+    host: synapse-persister1
+    port: 9093
+  persister2:
+    host: synapse-persister2
+    port: 9093
+
+# Запись событий — в двух процессах: комнаты распределяются между ними по хешу ID.
+stream_writers:
+  events:
+    - persister1
+    - persister2

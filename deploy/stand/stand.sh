@@ -31,7 +31,8 @@ EMBED_ORIGINS="https://ris.example.ru …" — страницы РИС/ЛИС, �
 SSO=off — без единого входа через Keycloak (по умолчанию он есть: +1 ГБ ОЗУ);
 AI=cpu — ИИ-«Секретарь» (стенограмма звонка и черновик протокола) на процессоре: +8 ГБ ОЗУ, +10 ГБ диска;
 LLM_URL=… LLM_MODEL=… — внешний OpenAI-совместимый ИИ-шлюз вместо LLM на стенде (с AI=cpu);
-ARCHIVE_AFTER_DAYS=0 — закрытые случаи уходят в архив в течение минуты (по умолчанию — через 14 дней без активности).
+ARCHIVE_AFTER_DAYS=0 — закрытые случаи уходят в архив в течение минуты (по умолчанию — через 14 дней без активности);
+WORKERS=on — Synapse с воркерами: 2 синхронизации, 2 записи событий, Valkey (+1 ГБ ОЗУ; для нагрузки — от 4 vCPU).
 USAGE
 }
 
@@ -51,7 +52,7 @@ cmd_init() {
   [[ -n $domain ]] || die "укажите домен: ./stand.sh init chat-test.example.ru admin@example.ru"
   # Заданное в командной строке (NODE_IP=… AI=cpu ./stand.sh init …) важнее сохранённого в .env.
   local overrides=() v
-  for v in TLS_MODE NODE_IP EMBED_ORIGINS AI SSO LLM_URL LLM_MODEL BUILD_CA_FILE ARCHIVE_AFTER_DAYS; do
+  for v in TLS_MODE NODE_IP EMBED_ORIGINS AI SSO LLM_URL LLM_MODEL BUILD_CA_FILE ARCHIVE_AFTER_DAYS WORKERS; do
     [[ -n ${!v+x} ]] && overrides+=("$v=${!v}")
   done
   if [[ -f $ENV_FILE ]]; then
@@ -94,9 +95,17 @@ cmd_init() {
   KC_ADMIN_PASSWORD=${KC_ADMIN_PASSWORD:-$(rand 20)}
   ARCHIVE_AFTER_DAYS=${ARCHIVE_AFTER_DAYS:-14}
   [[ $ARCHIVE_AFTER_DAYS =~ ^[0-9]+$ ]] || die "ARCHIVE_AFTER_DAYS — целое число дней"
+  WORKERS=${WORKERS:-off}
+  [[ $WORKERS == on || $WORKERS == off ]] || die "WORKERS=on или WORKERS=off"
   COMPOSE_PROFILES=
   if [[ $SSO == keycloak ]]; then COMPOSE_PROFILES=sso; fi
   if [[ $AI == cpu ]]; then COMPOSE_PROFILES=${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}ai; fi
+  if [[ $WORKERS == on ]]; then
+    COMPOSE_PROFILES=${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}workers
+    SYNAPSE_SYNC_UPSTREAMS="synapse-sync1:8008 synapse-sync2:8008"
+  else
+    SYNAPSE_SYNC_UPSTREAMS="synapse:8008"
+  fi
   # Сертификат прокси нужен и LLM-сервису: он скачивает модель при первом запуске.
   if [[ $AI == cpu && -n ${BUILD_CA_FILE:-} ]]; then LLM_SSL_CERT_FILE=/etc/konsilium/ca.crt; else LLM_SSL_CERT_FILE=; fi
 
@@ -138,6 +147,9 @@ LLM_MODEL=$LLM_MODEL
 LLM_SSL_CERT_FILE=$LLM_SSL_CERT_FILE
 # Архив: через сколько дней без активности закрытый случай уходит в архив (0 — сразу, для проверки).
 ARCHIVE_AFTER_DAYS=$ARCHIVE_AFTER_DAYS
+# Synapse с воркерами: on | off. Синхронизацию Caddy направляет на SYNAPSE_SYNC_UPSTREAMS.
+WORKERS=$WORKERS
+SYNAPSE_SYNC_UPSTREAMS="$SYNAPSE_SYNC_UPSTREAMS"
 ENV
 
   DOMAIN_RE=${DOMAIN//./\\.}
@@ -198,6 +210,14 @@ sso:
   render homeserver.yaml synapse/homeserver.yaml
   render appservice-ccs.yaml synapse/appservice-ccs.yaml
   render log.yaml synapse/log.yaml
+  # Воркеры — та же схема, что в окружении разработчика (infra/synapse/workers); выключены — пустая добавка.
+  mkdir -p "$GEN/synapse/workers"
+  if [[ $WORKERS == on ]]; then
+    cp ../../infra/synapse/workers/shared.yaml "$GEN/synapse/workers.yaml"
+    for w in sync1 sync2 persister1 persister2; do cp "../../infra/synapse/workers/$w.yaml" "$GEN/synapse/workers/$w.yaml"; done
+  else
+    printf '# Synapse без воркеров (WORKERS=off)\nredis:\n  enabled: false\n' >"$GEN/synapse/workers.yaml"
+  fi
   render livekit.yaml livekit.yaml
   render connectors.json connectors.json
   render realm-konsilium.json realm-konsilium.json
@@ -207,7 +227,8 @@ sso:
   render config.json config.json
   if [[ -n $ACME_EMAIL ]]; then echo "email $ACME_EMAIL" >"$GEN/caddy-global.caddy"; else echo "# email для ACME не задан" >"$GEN/caddy-global.caddy"; fi
   # Synapse в контейнере читает конфигурацию от своего пользователя.
-  chmod 644 "$GEN"/synapse/* "$GEN"/livekit.yaml "$GEN"/connectors.json "$GEN"/config.json "$GEN"/caddy-global.caddy "$GEN"/realm-konsilium.json
+  chmod 644 "$GEN"/synapse/*.yaml "$GEN"/synapse/workers/*.yaml 2>/dev/null || true
+  chmod 644 "$GEN"/livekit.yaml "$GEN"/connectors.json "$GEN"/config.json "$GEN"/caddy-global.caddy "$GEN"/realm-konsilium.json
   echo "Конфигурация для https://$DOMAIN готова (секреты — в deploy/stand/$ENV_FILE). Дальше: ./stand.sh up"
 }
 

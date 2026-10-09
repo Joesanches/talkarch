@@ -1,0 +1,67 @@
+# Synapse с воркерами (docs/03-architecture.md, 9.2): главный процесс, 2 воркера синхронизации, 2 воркера записи
+# событий, Valkey и маршрутизатор запросов на порту 8008 вместо главного процесса.
+#   docker compose -f docker-compose.yml -f docker-compose.workers.yml up -d
+# Конфигурация — synapse/workers/. Вернуться к одному процессу: docker compose up -d --remove-orphans.
+x-worker: &worker
+  image: matrixdotorg/synapse:v1.162.0
+  entrypoint: ["python", "-m", "synapse.app.generic_worker"]
+  restart: unless-stopped
+  depends_on:
+    synapse:
+      condition: service_healthy
+  volumes:
+    - ./synapse:/config:ro
+    - synapse-data:/data
+
+services:
+  # Обмен сообщениями между процессами Synapse. Valkey — форк Redis под BSD-3 (у Redis 7.4+ — RSAL/SSPL/AGPL).
+  valkey:
+    image: valkey/valkey:8.1-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  synapse:
+    command: ["-c", "/config/homeserver.yaml", "-c", "/config/workers/shared.yaml"]
+    depends_on:
+      valkey:
+        condition: service_healthy
+    # Снаружи — только маршрутизатор.
+    ports: !reset []
+
+  synapse-sync1:
+    <<: *worker
+    command: ["-c", "/config/homeserver.yaml", "-c", "/config/workers/shared.yaml", "-c", "/config/workers/sync1.yaml"]
+    healthcheck: { test: ["CMD", "curl", "-fsS", "http://localhost:8008/health"], interval: 2s, timeout: 3s, retries: 60 }
+  synapse-sync2:
+    <<: *worker
+    command: ["-c", "/config/homeserver.yaml", "-c", "/config/workers/shared.yaml", "-c", "/config/workers/sync2.yaml"]
+    healthcheck: { test: ["CMD", "curl", "-fsS", "http://localhost:8008/health"], interval: 2s, timeout: 3s, retries: 60 }
+  synapse-persister1:
+    <<: *worker
+    command: ["-c", "/config/homeserver.yaml", "-c", "/config/workers/shared.yaml", "-c", "/config/workers/persister1.yaml"]
+    healthcheck: { test: ["CMD", "curl", "-fsS", "http://localhost:9093/health"], interval: 2s, timeout: 3s, retries: 60 }
+  synapse-persister2:
+    <<: *worker
+    command: ["-c", "/config/homeserver.yaml", "-c", "/config/workers/shared.yaml", "-c", "/config/workers/persister2.yaml"]
+    healthcheck: { test: ["CMD", "curl", "-fsS", "http://localhost:9093/health"], interval: 2s, timeout: 3s, retries: 60 }
+
+  synapse-router:
+    image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    environment:
+      SYNAPSE_SYNC_WORKERS: "synapse-sync1:8008 synapse-sync2:8008"
+    volumes:
+      - ./synapse/workers/router.Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      synapse-sync1: { condition: service_healthy }
+      synapse-sync2: { condition: service_healthy }
+      synapse-persister1: { condition: service_healthy }
+      synapse-persister2: { condition: service_healthy }
+    ports:
+      - "8008:8008"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

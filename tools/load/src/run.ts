@@ -45,7 +45,8 @@ const ARCHIVE_ROOMS = num('ARCHIVE_ROOMS', 100);
 const SYNC_MODE = env.SYNC_MODE === 'sliding' ? 'sliding' : 'classic';
 const RUN = env.RUN_ID ?? Date.now().toString(36);
 const ROOT = resolve(import.meta.dirname, '../../..');
-const OUT = resolve(env.OUT ?? join(ROOT, 'tools/load/results', `load-${RUN}.json`));
+// Относительный OUT — от корня репозитория (pnpm запускает тест из tools/load).
+const OUT = env.OUT ? resolve(ROOT, env.OUT) : join(ROOT, 'tools/load/results', `load-${RUN}.json`);
 
 const PASSWORD = 'dev-only-load-password-1';
 const LOAD_TOKEN = 'dev-only-load-token-0123456789abcdef';
@@ -55,9 +56,12 @@ const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 
 
 // ── Ресурсы ──────────────────────────────────────────────────────────────────
 
+/** Процессор и память Synapse (главный процесс и воркеры, если есть) и PostgreSQL стенда. */
 function dockerStats(): Record<string, string> {
   try {
-    const out = execFileSync('docker', ['stats', '--no-stream', '--format', '{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}', SYNAPSE_CONTAINER, PG_CONTAINER], { encoding: 'utf8' });
+    const project = SYNAPSE_CONTAINER.replace(/-synapse-1$/, '');
+    const names = execFileSync('docker', ['ps', '--format', '{{.Names}}', '--filter', `name=^${project}-(synapse|postgres|valkey)`], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
+    const out = execFileSync('docker', ['stats', '--no-stream', '--format', '{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}', ...(names.length ? names : [SYNAPSE_CONTAINER, PG_CONTAINER])], { encoding: 'utf8' });
     return Object.fromEntries(out.trim().split('\n').map((l) => { const [n, cpu, mem] = l.split('\t'); return [n!.replace(/^konsilium-load-|-1$/g, ''), `${cpu} · ${mem?.split(' / ')[0]}`]; }));
   } catch {
     return {};
@@ -484,14 +488,22 @@ async function main() {
       if (joined.status !== 200) throw new Error(`join http ${joined.status}`);
       lap('join');
       // История на экране: как веб-клиент — подписка Sliding Sync на комнату (50 событий и всё состояние) или /messages.
-      const history =
-        SYNC_MODE === 'sliding'
-          ? await hs.call<any>('POST', '/_matrix/client/unstable/org.matrix.simplified_msc3575/sync?timeout=0', u.token, {
-              room_subscriptions: { [j.roomId]: { timeline_limit: 50, required_state: [['*', '*']] } },
-            })
-          : await hs.call<any>('GET', `/_matrix/client/v3/rooms/${encodeURIComponent(j.roomId)}/messages?dir=b&limit=50`, u.token);
-      const events: any[] = SYNC_MODE === 'sliding' ? (history.json.rooms?.[j.roomId]?.timeline ?? []) : (history.json.chunk ?? []);
-      if (history.status !== 200 || !events.some((e) => e.type === 'm.room.message')) throw new Error(`history http ${history.status}, ${events.length} событий`);
+      // С воркерами вход доходит до воркера синхронизации репликацией: пустой ответ сразу после входа — повторяем,
+      // как это сделал бы следующий запрос синхронизации клиента (время ожидания входит в замер).
+      let events: any[] = [];
+      let status = 0;
+      for (let attempt = 0; attempt < 40 && !events.some((e) => e.type === 'm.room.message'); attempt++) {
+        if (attempt) await sleep(50);
+        const history =
+          SYNC_MODE === 'sliding'
+            ? await hs.call<any>('POST', '/_matrix/client/unstable/org.matrix.simplified_msc3575/sync?timeout=0', u.token, {
+                room_subscriptions: { [j.roomId]: { timeline_limit: 50, required_state: [['*', '*']] } },
+              })
+            : await hs.call<any>('GET', `/_matrix/client/v3/rooms/${encodeURIComponent(j.roomId)}/messages?dir=b&limit=50`, u.token);
+        status = history.status;
+        events = SYNC_MODE === 'sliding' ? (history.json.rooms?.[j.roomId]?.timeline ?? []) : (history.json.chunk ?? []);
+      }
+      if (status !== 200 || !events.some((e) => e.type === 'm.room.message')) throw new Error(`history http ${status}, ${events.length} событий`);
       lap('history');
       rec.ok(performance.now() - t0);
     } catch (e) {

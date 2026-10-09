@@ -1,0 +1,397 @@
+{
+  "run": "r5w",
+  "started_at": "2026-10-08T23:23:22.893Z",
+  "params": {
+    "USERS": 240,
+    "ROOMS_PER_USER": 20,
+    "CREATE_RATE": 2.5,
+    "BURST": 300,
+    "BURST_RATE": 5,
+    "HEAVY": 5,
+    "HEAVY_ROOMS": 200,
+    "EVENTS": 1000,
+    "MSG_RATES": [
+      2,
+      10,
+      30
+    ],
+    "STEP_S": 60,
+    "SYNC_MODE": "sliding",
+    "ARCHIVE_ROOMS": 100
+  },
+  "users": {
+    "registration": {
+      "n": 245,
+      "errors": 0,
+      "p50": 410,
+      "p95": 487,
+      "p99": 508,
+      "max": 516,
+      "mean": 418
+    }
+  },
+  "A1_case_snapshots": {
+    "batch_of_100": {
+      "n": 19,
+      "errors": 0,
+      "p50": 353,
+      "p95": 426,
+      "p99": 426,
+      "max": 426,
+      "mean": 359
+    },
+    "events_per_s": 279
+  },
+  "A2_chat_creation_paced": {
+    "rate_per_s": 2.5,
+    "duration_s": 640,
+    "all": {
+      "n": 1600,
+      "errors": 0,
+      "p50": 1087,
+      "p95": 1409,
+      "p99": 1605,
+      "max": 2961,
+      "mean": 1066
+    },
+    "first_10pct": {
+      "n": 160,
+      "errors": 0,
+      "p50": 1087,
+      "p95": 1276,
+      "p99": 1357,
+      "max": 1428,
+      "mean": 1090
+    },
+    "last_10pct": {
+      "n": 160,
+      "errors": 0,
+      "p50": 843,
+      "p95": 988,
+      "p99": 1300,
+      "max": 1396,
+      "mean": 864
+    },
+    "ccs_cpu_pct": 3,
+    "containers_mid": {
+      "synapse-router": "0.00% · 16.01MiB",
+      "synapse-persister2": "0.66% · 172.2MiB",
+      "synapse-sync2": "0.43% · 122.1MiB",
+      "synapse-persister1": "0.72% · 174.3MiB",
+      "synapse-sync1": "1.70% · 122.3MiB",
+      "synapse": "0.85% · 208.1MiB",
+      "postgres": "0.29% · 279MiB",
+      "valkey": "2.46% · 7.25MiB"
+    }
+  },
+  "A3_chat_creation_peak": {
+    "offered_rate_per_s": 5,
+    "achieved_rooms_per_s": 4.7,
+    "offered_s": 63,
+    "all": {
+      "n": 300,
+      "errors": 0,
+      "p50": 4408,
+      "p95": 5964,
+      "p99": 6268,
+      "max": 6573,
+      "mean": 4460
+    },
+    "first_10pct": {
+      "n": 30,
+      "errors": 0,
+      "p50": 2176,
+      "p95": 2811,
+      "p99": 2902,
+      "max": 2902,
+      "mean": 2211
+    },
+    "last_10pct": {
+      "n": 30,
+      "errors": 0,
+      "p50": 5225,
+      "p95": 6210,
+      "p99": 6419,
+      "max": 6419,
+      "mean": 5124
+    },
+    "containers_mid": {
+      "synapse-router": "0.67% · 17.47MiB",
+      "synapse-persister2": "50.17% · 191.5MiB",
+      "synapse-sync2": "6.63% · 121.9MiB",
+      "synapse-persister1": "34.47% · 193.4MiB",
+      "synapse-sync1": "6.58% · 121.9MiB",
+      "synapse": "88.75% · 236.2MiB",
+      "postgres": "111.08% · 333.9MiB",
+      "valkey": "1.63% · 6.312MiB"
+    }
+  },
+  "joins": {
+    "n": 6700,
+    "errors": 0,
+    "p50": 719,
+    "p95": 1149,
+    "p99": 1295,
+    "max": 1617,
+    "mean": 724
+  },
+  "B1_notifications": {
+    "batch_of_50": {
+      "n": 20,
+      "errors": 0,
+      "p50": 1818,
+      "p95": 2039,
+      "p99": 2332,
+      "max": 2332,
+      "mean": 1869
+    },
+    "events_per_s": 27
+  },
+  "B2_case_updates": {
+    "batch_of_50": {
+      "n": 20,
+      "errors": 0,
+      "p50": 4209,
+      "p95": 4468,
+      "p99": 4517,
+      "max": 4517,
+      "mean": 4259
+    },
+    "events_per_s": 12
+  },
+  "C0_send_without_clients": {
+    "rate_per_s": 2,
+    "send": {
+      "n": 120,
+      "errors": 0,
+      "p50": 89,
+      "p95": 113,
+      "p99": 128,
+      "max": 138,
+      "mean": 91
+    }
+  },
+  "D1_cold_start_regular": {
+    "rooms_per_user": 20,
+    "one_by_one": {
+      "n": 20,
+      "errors": 0,
+      "p50": 280,
+      "p95": 349,
+      "p99": 356,
+      "max": 356,
+      "mean": 277
+    },
+    "all_at_once": {
+      "n": 240,
+      "errors": 0,
+      "p50": 24136,
+      "p95": 29225,
+      "p99": 29520,
+      "max": 29527,
+      "mean": 21849
+    }
+  },
+  "C_message_delivery": {
+    "clients": 240,
+    "steps": [
+      {
+        "rate_per_s": 2,
+        "duration_s": 60,
+        "send": {
+          "n": 120,
+          "errors": 0,
+          "p50": 91,
+          "p95": 127,
+          "p99": 266,
+          "max": 471,
+          "mean": 101
+        },
+        "delivery": {
+          "n": 240,
+          "errors": 0,
+          "p50": 115,
+          "p95": 197,
+          "p99": 406,
+          "max": 508,
+          "mean": 132
+        },
+        "delivered_pct": 100,
+        "ccs_cpu_pct": 0,
+        "containers_mid": {
+          "synapse-router": "0.40% · 39.54MiB",
+          "synapse-persister2": "3.77% · 205.8MiB",
+          "synapse-sync2": "3.85% · 258MiB",
+          "synapse-persister1": "3.64% · 207.5MiB",
+          "synapse-sync1": "4.04% · 222.6MiB",
+          "synapse": "3.50% · 271MiB",
+          "postgres": "3.38% · 489.9MiB",
+          "valkey": "2.91% · 8.609MiB"
+        }
+      },
+      {
+        "rate_per_s": 10,
+        "duration_s": 60,
+        "send": {
+          "n": 600,
+          "errors": 0,
+          "p50": 94,
+          "p95": 544,
+          "p99": 887,
+          "max": 1127,
+          "mean": 141
+        },
+        "delivery": {
+          "n": 1200,
+          "errors": 0,
+          "p50": 123,
+          "p95": 766,
+          "p99": 1403,
+          "max": 1889,
+          "mean": 191
+        },
+        "delivered_pct": 100,
+        "ccs_cpu_pct": 1,
+        "containers_mid": {
+          "synapse-router": "0.00% · 43.47MiB",
+          "synapse-persister2": "0.62% · 206.3MiB",
+          "synapse-sync2": "3.19% · 258.2MiB",
+          "synapse-persister1": "3.84% · 209.7MiB",
+          "synapse-sync1": "3.53% · 222.7MiB",
+          "synapse": "0.69% · 272.9MiB",
+          "postgres": "3.17% · 498MiB",
+          "valkey": "0.24% · 8.961MiB"
+        }
+      },
+      {
+        "rate_per_s": 30,
+        "duration_s": 66,
+        "send": {
+          "n": 1800,
+          "errors": 0,
+          "p50": 6604,
+          "p95": 8243,
+          "p99": 8483,
+          "max": 9359,
+          "mean": 5912
+        },
+        "delivery": {
+          "n": 3600,
+          "errors": 0,
+          "p50": 9873,
+          "p95": 14181,
+          "p99": 15779,
+          "max": 19073,
+          "mean": 8741
+        },
+        "delivered_pct": 100,
+        "ccs_cpu_pct": 1,
+        "containers_mid": {
+          "synapse-router": "5.27% · 58.8MiB",
+          "synapse-persister2": "18.74% · 209.5MiB",
+          "synapse-sync2": "54.33% · 258.5MiB",
+          "synapse-persister1": "16.82% · 211.9MiB",
+          "synapse-sync1": "35.38% · 224.4MiB",
+          "synapse": "87.56% · 287.1MiB",
+          "postgres": "140.64% · 513MiB",
+          "valkey": "0.85% · 8.988MiB"
+        }
+      }
+    ]
+  },
+  "D2_cold_start_heavy": {
+    "rooms_per_user": 200,
+    "initial_sync_first": {
+      "n": 5,
+      "errors": 0,
+      "p50": 5850,
+      "p95": 6024,
+      "p99": 6024,
+      "max": 6024,
+      "mean": 5890
+    },
+    "initial_sync_repeat_cached": {
+      "n": 10,
+      "errors": 0,
+      "p50": 112,
+      "p95": 144,
+      "p99": 144,
+      "max": 144,
+      "mean": 119
+    },
+    "sliding_sync_first_20": {
+      "n": 15,
+      "errors": 0,
+      "p50": 72,
+      "p95": 135,
+      "p99": 135,
+      "max": 135,
+      "mean": 87
+    }
+  },
+  "E1_archive": {
+    "rooms": 100,
+    "archived": 100,
+    "duration_s": 71.9,
+    "rooms_per_s": 1.4
+  },
+  "E2_archive_return": {
+    "one_by_one": {
+      "n": 50,
+      "errors": 0,
+      "p50": 347,
+      "p95": 420,
+      "p99": 499,
+      "max": 499,
+      "mean": 351
+    },
+    "all_at_once": {
+      "n": 48,
+      "errors": 2,
+      "p50": 3382,
+      "p95": 4656,
+      "p99": 4692,
+      "max": 4692,
+      "mean": 3280,
+      "errorKinds": {
+        "history http 200, 0 событий": 2
+      }
+    },
+    "all_at_once_phases": {
+      "open_ccs": {
+        "n": 50,
+        "errors": 0,
+        "p50": 2242,
+        "p95": 3986,
+        "p99": 4149,
+        "max": 4149,
+        "mean": 2233
+      },
+      "join": {
+        "n": 50,
+        "errors": 0,
+        "p50": 641,
+        "p95": 989,
+        "p99": 1044,
+        "max": 1044,
+        "mean": 662
+      },
+      "history": {
+        "n": 48,
+        "errors": 0,
+        "p50": 372,
+        "p95": 633,
+        "p99": 720,
+        "max": 720,
+        "mean": 400
+      }
+    }
+  },
+  "database": {
+    "synapse_db": "289 MB",
+    "rooms": "1900",
+    "events": "38140",
+    "users": "245"
+  },
+  "finished_at": "2026-10-08T23:49:48.377Z"
+}

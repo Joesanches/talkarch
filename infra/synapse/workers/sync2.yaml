@@ -1,0 +1,12 @@
+# Воркер синхронизации: /sync, Simplified Sliding Sync. Запросы направляет маршрутизатор (router.Caddyfile).
+worker_app: synapse.app.generic_worker
+worker_name: sync2
+worker_log_config: /config/log.yaml
+worker_listeners:
+  - type: http
+    bind_addresses: ["0.0.0.0"]
+    port: 8008
+    x_forwarded: true
+    resources:
+      - names: [client]
+        compress: false

@@ -1,0 +1,26 @@
+# Маршрутизатор Synapse с воркерами: синхронизация — воркерам синхронизации (один пользователь — всегда на тот же воркер,
+# там его кеш), остальное — главному процессу. Воркеры записи событий снаружи не видны.
+{
+	admin off
+	auto_https off
+}
+
+:8008 {
+	@sync path_regexp ^/_matrix/client/((r0|v3)/sync|unstable/org\.matrix\.simplified_msc3575/sync|(api/v1|r0|v3)/events|(api/v1|r0|v3)/initialSync|(api/v1|r0|v3)/rooms/[^/]+/initialSync)$
+	handle @sync {
+		reverse_proxy {$SYNAPSE_SYNC_WORKERS} {
+			lb_policy header Authorization
+			# Долгий опрос /sync держит соединение до 30 с.
+			transport http {
+				read_timeout 90s
+			}
+		}
+	}
+	handle {
+		reverse_proxy synapse:8008 {
+			transport http {
+				read_timeout 90s
+			}
+		}
+	}
+}

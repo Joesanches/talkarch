@@ -114,6 +114,26 @@ set -a && . apps/ccs/.env && set +a && pnpm dev:ccs
 E2E_AI=1 pnpm e2e secretary
 ```
 
+## Synapse с воркерами
+
+Схема продуктивного сервера ([docs/03-architecture.md, 9.2](../docs/03-architecture.md#92-сервер)) в миниатюре — для проверки и нагрузочного теста:
+
+```bash
+cd infra
+docker compose -f docker-compose.yml -f docker-compose.workers.yml up -d    # с воркерами
+docker compose up -d --remove-orphans                                       # обратно — один процесс
+```
+
+| Процесс | Что делает |
+|---|---|
+| `synapse` | Главный процесс: API клиентов (отправка, комнаты, вход), Application Service сервиса контекста |
+| `synapse-sync1`, `synapse-sync2` | Синхронизация: `/sync` и Simplified Sliding Sync. Пользователь всегда попадает на один и тот же воркер (там его кеш) |
+| `synapse-persister1`, `synapse-persister2` | Запись событий в базу: комнаты распределены между ними по хешу ID |
+| `valkey` | Обмен между процессами Synapse. Valkey — совместимая с Redis замена под BSD-3: у Redis 7.4+ лицензии RSAL/SSPL, у Redis 8 — ещё и AGPLv3 |
+| `synapse-router` | Caddy на порту 8008 вместо главного процесса: синхронизацию — воркерам, остальное — главному процессу |
+
+Конфигурация — `synapse/workers/`. Клиенты, сервис контекста и тесты работают с тем же адресом `http://localhost:8008`. Учтите задержку репликации: изменение, сделанное через главный процесс (например, «забыть» комнату), воркер синхронизации видит через доли секунды.
+
 ## Остановка и сброс
 
 ```bash

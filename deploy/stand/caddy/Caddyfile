@@ -26,7 +26,12 @@
 	}
 
 	# Matrix Client-Server API. Admin API Synapse (/_synapse/admin) наружу не публикуется.
+	# Синхронизация при WORKERS=on — воркерам синхронизации (один пользователь — всегда на тот же воркер, там его кеш).
 	handle /_matrix/* {
+		@sync path_regexp ^/_matrix/client/((r0|v3)/sync|unstable/org\.matrix\.simplified_msc3575/sync|(api/v1|r0|v3)/events|(api/v1|r0|v3)/initialSync|(api/v1|r0|v3)/rooms/[^/]+/initialSync)$
+		reverse_proxy @sync {$SYNAPSE_SYNC_UPSTREAMS:synapse:8008} {
+			lb_policy header Authorization
+		}
 		reverse_proxy synapse:8008
 	}
 	handle /_synapse/client/* {

@@ -1,0 +1,10 @@
+# Воркер записи событий: принимает события от остальных процессов по репликации и пишет их в базу.
+worker_app: synapse.app.generic_worker
+worker_name: persister1
+worker_log_config: /config/log.yaml
+worker_listeners:
+  - type: http
+    bind_addresses: ["0.0.0.0"]
+    port: 9093
+    resources:
+      - names: [replication]
