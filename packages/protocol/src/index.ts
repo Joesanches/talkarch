@@ -177,6 +177,34 @@ export const CaseRolesContent = z.object({
 });
 export type CaseRolesContent = z.infer<typeof CaseRolesContent>;
 
+/**
+ * Причина, с которой сервис выводит участников архивного чата. По ней клиент узнаёт архив и тогда, когда сервер не
+ * прислал изменение состояния перед выводом (Tuwunel — docs/11-load-test.md, 7.4).
+ */
+export const ARCHIVE_KICK_REASON = 'Случай в архиве';
+
+/**
+ * Снимок состояния в приглашении. Клиенту нужны контекст случая, статусы критических находок и архив ещё до входа в
+ * чат (карточка, счётчики РИС/ЛИС, «!» в списке). Synapse добавляет их в приглашение сам (`room_prejoin_state`), Tuwunel —
+ * нет (docs/11-load-test.md, 7.4). Поэтому сервис контекста кладёт снимок этих событий в само приглашение
+ * (`m.room.member`, поле `ru.vendor.prejoin_state`), а клиент дополняет им то, чего нет в `invite_state`.
+ */
+export const PREJOIN_STATE_KEY = `${NS}.prejoin_state` as const;
+export const PREJOIN_STATE_TYPES: readonly string[] = [EventType.CaseContext, EventType.CriticalStatus, EventType.CaseArchive];
+
+export const PrejoinStateEvent = z.object({ type: z.string(), state_key: z.string(), content: z.record(z.unknown()) });
+export type PrejoinStateEvent = z.infer<typeof PrejoinStateEvent>;
+
+/** События снимка из содержимого приглашения: только типы из `PREJOIN_STATE_TYPES`, неразборчивое — пропускается. */
+export function parsePrejoinState(memberContent: unknown): PrejoinStateEvent[] {
+  const raw = (memberContent as Record<string, unknown> | null | undefined)?.[PREJOIN_STATE_KEY];
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((e) => {
+    const r = PrejoinStateEvent.safeParse(e);
+    return r.success && PREJOIN_STATE_TYPES.includes(r.data.type) ? [r.data] : [];
+  });
+}
+
 /** `ru.vendor.case.archive`: в архиве (только чтение) или снова активен (случай открыт заново в системе-источнике). */
 export const CaseArchiveContent = z.object({
   status: z.enum(['archived', 'active']),

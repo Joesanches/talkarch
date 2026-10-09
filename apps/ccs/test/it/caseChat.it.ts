@@ -10,7 +10,7 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createHostMock, type HostMock } from '@konsilium/host-mock';
 import { registerUser } from '@konsilium/host-mock/users';
-import { EventType, MsgType, NotificationField, RoomType } from '@konsilium/protocol';
+import { EventType, MsgType, NotificationField, PREJOIN_STATE_KEY, RoomType } from '@konsilium/protocol';
 import { loadConfig } from '../../src/config.ts';
 import { createService } from '../../src/index.ts';
 
@@ -26,6 +26,8 @@ const PG_ADMIN = process.env.IT_PG_URL ?? 'postgres://synapse:synapse-dev@localh
 const PG_DB = `ccs_it_${Date.now()}`;
 const RIS_CASE = 'A26-118734';
 const enc = encodeURIComponent;
+// Токен сервиса контекста (appservice) окружения разработчика: читать состояние комнаты глазами сервиса.
+const AS = 'dev-only-as-token-0123456789abcdef';
 
 async function cs<T = any>(token: string | null, method: string, path: string, body?: unknown): Promise<{ status: number; json: T }> {
   const res = await fetch(`${HS}/_matrix/client/v3${path}`, {
@@ -97,7 +99,7 @@ describe('Чат случая на сервере Matrix с песочницей
       CCS_HOST: '0.0.0.0',
       CCS_PORT: String(CCS_PORT),
       HS_URL: HS,
-      AS_TOKEN: 'dev-only-as-token-0123456789abcdef',
+      AS_TOKEN: AS,
       HS_TOKEN: 'dev-only-hs-token-0123456789abcdef',
       ALIAS_SECRET: `dev-only-alias-secret-it-${Date.now()}`,
       CONNECTORS_FILE: resolve(import.meta.dirname, '../../fixtures/connectors.json'),
@@ -150,6 +152,10 @@ describe('Чат случая на сервере Matrix с песочницей
     roomId = res.json.roomId;
     const sync = await cs(tok.ershova!, 'GET', `/sync?timeout=0&filter=${enc(JSON.stringify({ room: { timeline: { limit: 1 } } }))}`);
     expect(Object.keys(sync.json.rooms?.invite ?? {})).toContain(roomId);
+    // Снимок контекста случая — в самом приглашении: клиент покажет карточку и счётчики до входа на любом сервере.
+    const invite = await cs(AS, 'GET', `/rooms/${enc(roomId)}/state/m.room.member/${enc('@ershova:konsilium.test')}`);
+    expect(invite.json.displayname).toBeTruthy(); // имя приглашённого — как у обычного /invite
+    expect(invite.json[PREJOIN_STATE_KEY]).toEqual([expect.objectContaining({ type: EventType.CaseContext, state_key: '', content: expect.objectContaining({ case_id: LIS_CASE }) })]);
   });
 
   it('повторные и параллельные открытия дают ту же комнату', async () => {
@@ -326,7 +332,6 @@ describe('Чат случая на сервере Matrix с песочницей
   });
 
   it('архив: закрытый случай — только чтение, участники выведены и после /forget пропадают из Sliding Sync; возврат с полной историей', async () => {
-    const AS = 'dev-only-as-token-0123456789abcdef';
     const CASE = 'A26-118736';
     const opened = await api(tok.orlov!, '/api/v1/cases/open', { connector: 'ris', caseId: CASE });
     const archRoom = opened.json.roomId as string;

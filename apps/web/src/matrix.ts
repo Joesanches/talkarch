@@ -10,7 +10,7 @@ import {
   type MatrixEvent,
   type Room,
 } from 'matrix-js-sdk';
-import { ArchivedCase, EventType } from '@konsilium/protocol';
+import { ARCHIVE_KICK_REASON, ArchivedCase, EventType } from '@konsilium/protocol';
 import { config } from './config.ts';
 import { startSync } from './sync.ts';
 import { criticalStatuses, isArchivedState, type TimelineItem } from './model.ts';
@@ -128,11 +128,16 @@ export function unreadCount(room: Room): number {
 /** Чат случая в архиве: только чтение. Состояние пишет только сервис контекста (уровень 100). */
 export const roomArchived = (room: Room) => isArchivedState(room.currentState.getStateEvents(EventType.CaseArchive, '')?.getContent());
 
-/** Сервис вывел пользователя из архивного чата (а не он вышел сам). */
+/**
+ * Сервис вывел пользователя из архивного чата (а не он вышел сам). Признак архива — состояние комнаты или причина
+ * вывода: не каждый сервер присылает изменение состояния перед выводом (Tuwunel — docs/11-load-test.md, 7.4).
+ */
 export function removedToArchive(room: Room, me: string | null): boolean {
-  if (!me || room.getMyMembership() !== 'leave' || !roomArchived(room)) return false;
-  const by = room.currentState.getStateEvents('m.room.member', me)?.getSender();
-  return !!by && by !== me;
+  if (!me || room.getMyMembership() !== 'leave') return false;
+  const member = room.currentState.getStateEvents('m.room.member', me);
+  const by = member?.getSender();
+  if (!by || by === me) return false;
+  return roomArchived(room) || member?.getContent().reason === ARCHIVE_KICK_REASON;
 }
 
 const forgetting = new WeakMap<MatrixClient, Set<string>>();

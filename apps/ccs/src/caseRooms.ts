@@ -94,6 +94,11 @@ export class CaseRoomService {
       const roomId = await this.matrix.createRoom(this.buildCreateRequest(hostCase, localpart));
       await this.store.set(key, roomId);
       await this.opts.archive?.track(roomId, hostCase);
+      // Приглашения — после создания, а не в createRoom: в них снимок контекста случая (MatrixApi.invite).
+      // Комната уже записана: не дошедшее приглашение повторит следующая синхронизация случая.
+      for (const userId of new Set(hostCase.participants.map((p) => p.userId))) {
+        if (userId !== this.matrix.botUserId) await this.matrix.invite(roomId, userId, 'Участник случая в системе-источнике');
+      }
       return { roomId, alias, created: true };
     } catch (e) {
       // Гонка между экземплярами сервиса: псевдоним уже занят — значит, комнату создал другой экземпляр.
@@ -241,7 +246,6 @@ export class CaseRoomService {
   }
 
   private buildCreateRequest(hostCase: HostCase, aliasLocalpart: string) {
-    const invite = [...new Set(hostCase.participants.map((p) => p.userId))].filter((u) => u !== this.matrix.botUserId);
     return {
       name: this.roomName(hostCase),
       room_alias_name: aliasLocalpart,
@@ -249,7 +253,6 @@ export class CaseRoomService {
       visibility: 'private' as const,
       creation_content: { type: RoomType.Case },
       initial_state: this.initialState(hostCase),
-      invite,
       // Комнаты версии 12: создатель (сервисный пользователь) имеет неограниченные права и не указывается в users.
       // Приглашают и меняют контекст только сервис и система-источник через него; участники пишут сообщения.
       power_level_content_override: {

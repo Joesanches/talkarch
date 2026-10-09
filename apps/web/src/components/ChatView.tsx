@@ -819,6 +819,16 @@ export function ChatView({
     await client.scrollback(room, 30).catch(() => undefined);
     setLoadingOlder(false);
   }
+  // Короткая лента догружается сама: после входа в комнату сервер может прислать только событие входа (обычная
+  // синхронизация Tuwunel — `limited`, docs/11-load-test.md, 7.4), и история не должна прятаться за «Показать раньше».
+  const backfilled = useRef(new Set<string>());
+  const messageCount = events.filter((ev) => ev.getType() === 'm.room.message').length;
+  const membership = room.getMyMembership();
+  useEffect(() => {
+    if (membership !== 'join' || messageCount >= 10 || !canLoadOlder || backfilled.current.has(room.roomId)) return;
+    backfilled.current.add(room.roomId);
+    void client.scrollback(room, 30).catch(() => undefined);
+  }, [room.roomId, membership, messageCount, canLoadOlder]); // eslint-disable-line react-hooks/exhaustive-deps
 
   let lastDay = '';
   let prevSender = '';

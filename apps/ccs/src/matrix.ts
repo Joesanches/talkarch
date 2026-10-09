@@ -2,6 +2,7 @@
  * Минимальный клиент Matrix Client-Server API для сервиса контекста.
  * Свой, а не mautrix/matrix-bot-sdk: меньше зависимостей и никаких copyleft-лицензий в ядре (см. docs/02-platforms.md).
  */
+import { PREJOIN_STATE_KEY, PREJOIN_STATE_TYPES } from '@konsilium/protocol';
 
 export type Membership = 'join' | 'invite' | 'leave' | 'ban' | 'knock';
 
@@ -55,6 +56,9 @@ export class MatrixError extends Error {
   }
 }
 
+/** Снимок состояния в приглашении — не больше половины предела события Matrix (64 КБ), с запасом на кириллицу в UTF-8. */
+const PREJOIN_MAX_CHARS = 16_000;
+
 let txnCounter = 0;
 const newTxnId = () => `ccs.${Date.now()}.${++txnCounter}`;
 const enc = encodeURIComponent;
@@ -95,8 +99,31 @@ export class HttpMatrixApi implements MatrixApi {
     }
   }
 
+  /**
+   * Приглашение со снимком состояния, нужного клиенту до входа (контекст случая, находки, архив): не каждый сервер кладёт
+   * свои типы в `invite_state` (`PREJOIN_STATE_KEY`). Такое приглашение — то же событие `m.room.member`, отправленное
+   * как состояние; имя и аватар приглашённого сервис кладёт сам, как это делает `/invite`. Без снимка (или если он не
+   * помещается в событие — предел Matrix 64 КБ) — обычное `/invite`.
+   */
   async invite(roomId: string, userId: string, reason?: string): Promise<void> {
-    await this.call('POST', `/rooms/${enc(roomId)}/invite`, { user_id: userId, ...(reason ? { reason } : {}) });
+    const state = await this.call<StateEventInit[]>('GET', `/rooms/${enc(roomId)}/state`);
+    const prejoin = state.filter((e) => PREJOIN_STATE_TYPES.includes(e.type)).map(({ type, state_key, content }) => ({ type, state_key, content }));
+    if (!prejoin.length || JSON.stringify(prejoin).length > PREJOIN_MAX_CHARS) {
+      await this.call('POST', `/rooms/${enc(roomId)}/invite`, { user_id: userId, ...(reason ? { reason } : {}) });
+      return;
+    }
+    type Profile = { displayname?: string; avatar_url?: string };
+    const profile = await this.call<Profile>('GET', `/profile/${enc(userId)}`).catch((e: unknown): Profile => {
+      if (e instanceof MatrixError && e.status === 404) return {};
+      throw e;
+    });
+    await this.sendState(roomId, 'm.room.member', userId, {
+      membership: 'invite',
+      ...(profile.displayname ? { displayname: profile.displayname } : {}),
+      ...(profile.avatar_url ? { avatar_url: profile.avatar_url } : {}),
+      ...(reason ? { reason } : {}),
+      [PREJOIN_STATE_KEY]: prejoin,
+    });
   }
 
   async kick(roomId: string, userId: string, reason?: string): Promise<void> {

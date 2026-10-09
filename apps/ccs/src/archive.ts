@@ -13,7 +13,7 @@
  * Выведенные остаются в комнате со статусом leave. Sliding Sync отдаёт такие комнаты в списке, пока пользователь
  * их не «забудет» (`/forget`), — это делает клиент (apps/web/src/matrix.ts, forgetArchived).
  */
-import { EventType, caseKey, type ArchivedCase, type CaseArchiveContent, type SourceSystem } from '@konsilium/protocol';
+import { ARCHIVE_KICK_REASON, EventType, caseKey, type ArchivedCase, type CaseArchiveContent, type SourceSystem } from '@konsilium/protocol';
 import type { HostCase } from './cases.ts';
 import type { Logger } from './events.ts';
 import { MatrixError, type MatrixApi, type Membership } from './matrix.ts';
@@ -274,7 +274,7 @@ export class ArchiveService {
     await m.sendEvent(roomId, 'm.room.message', { msgtype: 'm.notice', body: ARCHIVED_NOTICE }, `archive.${roomId}.${at}`);
     const members = (await m.members(roomId)).filter((x) => x.userId !== m.botUserId && ACTIVE.has(x.membership)).map((x) => x.userId);
     await this.deps.store.addMembers(roomId, members);
-    for (const userId of members) await m.kick(roomId, userId, 'Случай в архиве');
+    for (const userId of members) await m.kick(roomId, userId, ARCHIVE_KICK_REASON);
     this.deps.log.info({ roomId, members: members.length }, 'Чат случая перенесён в архив');
   }
 
@@ -283,7 +283,7 @@ export class ArchiveService {
     if (!(await this.isArchived(roomId))) return false;
     const membership = await this.deps.matrix.getMembership(roomId, userId);
     if (!membership || !ACTIVE.has(membership)) return false;
-    await this.deps.matrix.kick(roomId, userId, 'Случай в архиве');
+    await this.deps.matrix.kick(roomId, userId, ARCHIVE_KICK_REASON);
     return true;
   }
 

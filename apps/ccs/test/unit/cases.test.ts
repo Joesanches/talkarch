@@ -21,7 +21,9 @@ describe('POST /api/v1/cases/open', () => {
 
     const room = h.matrix.rooms.get(body.roomId)!;
     expect(room.req.creation_content).toEqual({ type: RoomType.Case });
-    expect(room.req.invite?.sort()).toEqual([mx('ershova'), mx('kolesnikov'), mx('smirnova')]);
+    // Приглашения — отдельно от createRoom (в них снимок контекста случая).
+    expect(room.req.invite).toBeUndefined();
+    for (const u of ['ershova', 'kolesnikov', 'smirnova']) expect(await h.matrix.getMembership(body.roomId, mx(u))).toBe('invite');
     const context = await h.matrix.getState<Record<string, any>>(body.roomId, EventType.CaseContext);
     expect(context).toMatchObject({ source: 'LIS', connector: 'lis', case_id: LIS_CASE, status: 'open', patient: { masked: 'Н*** О. В.' } });
     expect(JSON.stringify(context)).not.toMatch(/Нестерова/);
